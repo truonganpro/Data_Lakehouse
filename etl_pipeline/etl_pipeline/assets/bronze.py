@@ -1,248 +1,69 @@
-from dagster import asset, AssetIn, Output, StaticPartitionsDefinition
-from datetime import datetime
-import polars as pl
-import pandas as pd
+from dagster import asset, Output
+from pyspark.sql import DataFrame
 
-COMPUTE_KIND = "SQL"
+COMPUTE_KIND = "SparkSQL"
 LAYER = "bronze"
 
 
-# genre from my_sql
-@asset(
-    description="Load table 'customers' from MySQL database as polars DataFrame, and save to minIO",
-    io_manager_key="minio_io_manager",
-    required_resource_keys={"mysql_io_manager"},
-    key_prefix=["bronze", "customer"],
-    compute_kind=COMPUTE_KIND,
-    group_name=LAYER,
-)
-# Extract data từ mysql
-def bronze_customer(context) -> Output[pl.DataFrame]:
-    query = "SELECT * FROM customers;"
-    df_data = context.resources.mysql_io_manager.extract_data(query)
-    context.log.info(f"Table extracted with shape: {df_data.shape}")
+def log_shape(context, df: DataFrame, name: str):
+    context.log.info(f"{name} rows={df.count()} cols={len(df.columns)}")
 
-    return Output(
-        value=df_data,
-        metadata={
-            "table": "customers",
-            "row_count": df_data.shape[0],
-            "column_count": df_data.shape[1],
-            "columns": df_data.columns,
-        },
+
+def load_mysql_table(context, table_name: str) -> DataFrame:
+    spark = context.resources.spark_io_manager._get_spark()
+
+    jdbc_url = (
+        "jdbc:mysql://de_mysql:3306/brazillian_ecommerce"
+        "?zeroDateTimeBehavior=CONVERT_TO_NULL"
+        "&serverTimezone=UTC"
+        "&useSSL=false"
+        "&allowPublicKeyRetrieval=true"
     )
 
+    df = spark.read.format("jdbc").options(
+        url=jdbc_url,
+        driver="com.mysql.cj.jdbc.Driver",
+        dbtable=table_name,
+        user="admin",
+        password="admin123",
+    ).load()
 
-# Tables Sellers từ mysql
-@asset(
-    description="Load table 'sellers' from MySQL database as polars DataFrame, and save to minIO",
-    io_manager_key="minio_io_manager",
-    required_resource_keys={"mysql_io_manager"},
-    key_prefix=["bronze", "seller"],
-    compute_kind=COMPUTE_KIND,
-    group_name=LAYER,
-)
-# Extract data từ mysql
-def bronze_seller(context) -> Output[pl.DataFrame]:
-    query = "SELECT * FROM sellers;"
-    df_data = context.resources.mysql_io_manager.extract_data(query)
-    context.log.info(f"Table extracted with shape: {df_data.shape}")
-
-    return Output(
-        value=df_data,
-        metadata={
-            "table": "sellers",
-            "row_count": df_data.shape[0],
-            "column_count": df_data.shape[1],
-            "columns": df_data.columns,
-        },
-    )
+    log_shape(context, df, f"bronze_{table_name}")
+    return df
 
 
-# Tables products from mysql
-@asset(
-    description="Load table 'products' from MySQL database as polars DataFrame, and save to minIO",
-    io_manager_key="minio_io_manager",
-    required_resource_keys={"mysql_io_manager"},
-    key_prefix=["bronze", "product"],
-    compute_kind=COMPUTE_KIND,
-    group_name=LAYER,
-)
-# Extract data từ mysql
-def bronze_product(context) -> Output[pl.DataFrame]:
-    query = "SELECT * FROM products;"
-    df_data = context.resources.mysql_io_manager.extract_data(query)
-    context.log.info(f"Table extracted with shape: {df_data.shape}")
+@asset(io_manager_key="spark_io_manager", compute_kind=COMPUTE_KIND, key_prefix=[LAYER, "customer"], group_name=LAYER)
+def bronze_customer(context):
+    return Output(load_mysql_table(context, "customers"))   # MySQL: customers → asset/table: bronze.customer
 
-    return Output(
-        value=df_data,
-        metadata={
-            "table": "products",
-            "row_count": df_data.shape[0],
-            "column_count": df_data.shape[1],
-            "columns": df_data.columns,
-        },
-    )
+@asset(io_manager_key="spark_io_manager", compute_kind=COMPUTE_KIND, key_prefix=[LAYER, "seller"], group_name=LAYER)
+def bronze_seller(context):
+    return Output(load_mysql_table(context, "sellers"))
 
+@asset(io_manager_key="spark_io_manager", compute_kind=COMPUTE_KIND, key_prefix=[LAYER, "product"], group_name=LAYER)
+def bronze_product(context):
+    return Output(load_mysql_table(context, "products"))
 
-# Tables from mysql
-@asset(
-    description="Load table 'orders' from MySQL database as polars DataFrame, and save to minIO",
-    io_manager_key="minio_io_manager",
-    required_resource_keys={"mysql_io_manager"},
-    key_prefix=["bronze", "order"],
-    compute_kind=COMPUTE_KIND,
-    group_name=LAYER,
-)
-# Extract data từ mysql
-def bronze_order(context) -> Output[pl.DataFrame]:
-    query = "SELECT * FROM orders;"
-    df_data = context.resources.mysql_io_manager.extract_data(query)
-    context.log.info(f"Table extracted with shape: {df_data.shape}")
+@asset(io_manager_key="spark_io_manager", compute_kind=COMPUTE_KIND, key_prefix=[LAYER, "order"], group_name=LAYER)
+def bronze_order(context):
+    return Output(load_mysql_table(context, "orders"))
 
-    return Output(
-        value=df_data,
-        metadata={
-            "table": "orders",
-            "row_count": df_data.shape[0],
-            "column_count": df_data.shape[1],
-            "columns": df_data.columns,
-        },
-    )
+@asset(io_manager_key="spark_io_manager", compute_kind=COMPUTE_KIND, key_prefix=[LAYER, "orderitem"], group_name=LAYER)
+def bronze_order_item(context):
+    return Output(load_mysql_table(context, "order_items"))
 
+@asset(io_manager_key="spark_io_manager", compute_kind=COMPUTE_KIND, key_prefix=[LAYER, "payment"], group_name=LAYER)
+def bronze_payment(context):
+    return Output(load_mysql_table(context, "order_payments"))
 
-# Tables from mysql
-@asset(
-    description="Load table 'order_items' from MySQL database as polars DataFrame, and save to minIO",
-    io_manager_key="minio_io_manager",
-    required_resource_keys={"mysql_io_manager"},
-    key_prefix=["bronze", "orderitem"],
-    compute_kind=COMPUTE_KIND,
-    group_name=LAYER,
-)
-# Extract data từ mysql
-def bronze_order_item(context) -> Output[pl.DataFrame]:
-    query = "SELECT * FROM order_items;"
-    df_data = context.resources.mysql_io_manager.extract_data(query)
-    context.log.info(f"Table extracted with shape: {df_data.shape}")
+@asset(io_manager_key="spark_io_manager", compute_kind=COMPUTE_KIND, key_prefix=[LAYER, "orderreview"], group_name=LAYER)
+def bronze_order_review(context):
+    return Output(load_mysql_table(context, "order_reviews"))
 
-    return Output(
-        value=df_data,
-        metadata={
-            "table": "order_items",
-            "row_count": df_data.shape[0],
-            "column_count": df_data.shape[1],
-            "columns": df_data.columns,
-        },
-    )
+@asset(io_manager_key="spark_io_manager", compute_kind=COMPUTE_KIND, key_prefix=[LAYER, "geolocation"], group_name=LAYER)
+def bronze_geolocation(context):
+    return Output(load_mysql_table(context, "geolocation"))
 
-
-# Tables from mysql
-@asset(
-    description="Load table 'payments' from MySQL database as polars DataFrame, and save to minIO",
-    io_manager_key="minio_io_manager",
-    required_resource_keys={"mysql_io_manager"},
-    key_prefix=["bronze", "payment"],
-    compute_kind=COMPUTE_KIND,
-    group_name=LAYER,
-)
-# Extract data từ mysql
-def bronze_payment(context) -> Output[pl.DataFrame]:
-    query = "SELECT * FROM payments;"
-    df_data = context.resources.mysql_io_manager.extract_data(query)
-    context.log.info(f"Table extracted with shape: {df_data.shape}")
-
-    return Output(
-        value=df_data,
-        metadata={
-            "table": "payments",
-            "row_count": df_data.shape[0],
-            "column_count": df_data.shape[1],
-            "columns": df_data.columns,
-        },
-    )
-
-
-# Tables from mysql
-@asset(
-    description="Load table 'order_reviews' from MySQL database as polars DataFrame, and save to minIO",
-    io_manager_key="minio_io_manager",
-    required_resource_keys={"mysql_io_manager"},
-    key_prefix=["bronze", "orderreview"],
-    compute_kind=COMPUTE_KIND,
-    group_name=LAYER,
-)
-# Extract data từ mysql
-def bronze_order_review(context) -> Output[pl.DataFrame]:
-    query = "SELECT * FROM order_reviews;"
-    df_data = context.resources.mysql_io_manager.extract_data(query)
-    context.log.info(f"Table extracted with shape: {df_data.shape}")
-    #data = [
-    #    ["An", 23, "Hà Nội"],
-    #    ["Bình", 21, "Đà Nẵng"],
-    #    ["Chi", 22, "Hồ Chí Minh"],
-    #    ["Dũng", 24, "Hải Phòng"],
-    #]
-    #df_data = pd.DataFrame(data, columns=["Tên", "Tuổi", "Thành Phố"])
-    return Output(
-        value=df_data,
-        metadata={
-            "table": "order_reviews",
-            "row_count": df_data.shape[0],
-            "column_count": df_data.shape[1],
-            "columns": df_data.columns,
-        },
-    )
-
-
-# Tables from mysql
-@asset(
-    description="Load table 'product_category_name_translation' from MySQL database as polars DataFrame, and save to minIO",
-    io_manager_key="minio_io_manager",
-    required_resource_keys={"mysql_io_manager"},
-    key_prefix=["bronze", "productcategory"],
-    compute_kind=COMPUTE_KIND,
-    group_name=LAYER,
-)
-# Extract data từ mysql
-def bronze_product_category(context) -> Output[pl.DataFrame]:
-    query = "SELECT * FROM product_category_name_translation;"
-    df_data = context.resources.mysql_io_manager.extract_data(query)
-    context.log.info(f"Table extracted with shape: {df_data.shape}")
-
-    return Output(
-        value=df_data,
-        metadata={
-            "table": "product_category",
-            "row_count": df_data.shape[0],
-            "column_count": df_data.shape[1],
-            "columns": df_data.columns,
-        },
-    )
-
-
-# --------------------#
-# Tables from mysql
-@asset(
-    description="Load table 'geolocation' from MySQL database as polars DataFrame, and save to minIO",
-    io_manager_key="minio_io_manager",
-    required_resource_keys={"mysql_io_manager"},
-    key_prefix=["bronze", "geolocation"],
-    compute_kind=COMPUTE_KIND,
-    group_name=LAYER,
-)
-# Extract data từ mysql
-def bronze_geolocation(context) -> Output[pl.DataFrame]:
-    query = "SELECT * FROM geolocation;"
-    df_data = context.resources.mysql_io_manager.extract_data(query)
-    context.log.info(f"Table extracted with shape: {df_data.shape}")
-
-    return Output(
-        value=df_data,
-        metadata={
-            "table": "geolocation",
-            "row_count": df_data.shape[0],
-            "column_count": df_data.shape[1],
-            "columns": df_data.columns,
-        },
-    )
+@asset(io_manager_key="spark_io_manager", compute_kind=COMPUTE_KIND, key_prefix=[LAYER, "productcategory"], group_name=LAYER)
+def bronze_product_category(context):
+    return Output(load_mysql_table(context, "product_category_name_translation"))

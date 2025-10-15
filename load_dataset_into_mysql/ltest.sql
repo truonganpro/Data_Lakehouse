@@ -1,6 +1,0 @@
-LOAD DATA LOCAL INFILE '/tmp/dataset/cube_sale.csv'
-INTO TABLE cube_sale
-FIELDS TERMINATED BY ',' 
-ENCLOSED BY '"'
-LINES TERMINATED BY '\n'
-IGNORE 1 ROWS;

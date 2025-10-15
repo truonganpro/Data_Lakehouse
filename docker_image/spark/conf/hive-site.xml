@@ -5,15 +5,15 @@
     </property>
     <property>
         <name>javax.jdo.option.ConnectionURL</name>
-        <value>jdbc:mysql://mariadb:3306/hive_metastore?createDatabaseIfNotExist=true</value>
+        <value>jdbc:mysql://de_mysql:3306/metastore?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true</value>
     </property>
     <property>
         <name>javax.jdo.option.ConnectionUserName</name>
-        <value>admin</value>
+        <value>hive</value>
     </property>
     <property>
         <name>javax.jdo.option.ConnectionPassword</name>
-        <value>admin</value>
+        <value>hive</value>
     </property>
     <property>
         <name>fs.s3a.access.key</name>
@@ -34,6 +34,14 @@
     <property>
         <name>fs.s3a.connection.ssl.enabled</name>
         <value>false</value>
+    </property>
+    <property>
+        <name>hive.metastore.uris</name>
+        <value>thrift://hive-metastore:9083</value>
+    </property>
+    <property>
+        <name>hive.metastore.warehouse.dir</name>
+        <value>s3a://lakehouse/</value>
     </property>
     <!-- <property>
         <name>hive.metastore.warehouse.dir</name>

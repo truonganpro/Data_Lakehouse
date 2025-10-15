@@ -27,3 +27,6 @@ RUN curl -O https://repo1.maven.org/maven2/software/amazon/awssdk/s3/2.18.41/s3-
 
 RUN pip install minio==7.1.16 \
     dagster==1.1.20 
+RUN pip install delta-spark==2.3.0 \
+    pyspark==3.3.2 \
+    findspark==2.0.1

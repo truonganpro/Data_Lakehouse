@@ -1,17 +1,15 @@
 from dagster import IOManager, InputContext, OutputContext
-from contextlib import contextmanager
-from sqlalchemy import create_engine # type: ignore
+from sqlalchemy import create_engine
 import polars as pl
 import os
 import pandas as pd
 
+
 def connect_mysql(config) -> str:
-    conn_info = (
+    return (
         f"mysql+pymysql://{config['user']}:{config['password']}"
-        + f"@{config['host']}:{config['port']}"
-        + f"/{config['database']}"
+        + f"@{config['host']}:{config['port']}/{config['database']}"
     )
-    return conn_info
 
 
 class MysqlIOManager(IOManager):
@@ -25,20 +23,22 @@ class MysqlIOManager(IOManager):
         }
 
     def handle_output(self, context: OutputContext, obj: pl.DataFrame):
+        # Chưa cần implement vì chủ yếu là extract
         pass
 
     def load_input(self, context: InputContext):
         pass
 
-
-
     def extract_data(self, sql: str) -> pl.DataFrame:
-        conn_info = connect_mysql(self._config)
-        # Tạo kết nối SQLAlchemy
-        engine = create_engine(conn_info)
+        """Chạy query và trả về Polars DataFrame (tất cả cột dưới dạng string)."""
+        engine = create_engine(connect_mysql(self._config))
         with engine.connect() as connection:
-            # Thực thi truy vấn và chuyển đổi kết quả sang Pandas DataFrame
             pandas_df = pd.read_sql(sql, connection)
-            # Chuyển đổi Pandas DataFrame thành Polars DataFrame
+
+            # Ép tất cả cột về string để tránh lỗi ArrowTypeError
+            pandas_df = pandas_df.astype(str)
+
+            # Convert sang Polars
             df_data = pl.from_pandas(pandas_df)
-        return df_data
+
+            return df_data

@@ -5,17 +5,18 @@ export HADOOP_CLASSPATH=${HADOOP_HOME}/share/hadoop/tools/lib/aws-java-sdk-bundl
 export JAVA_HOME=/usr/local/openjdk-8
 
 # Make sure mariadb is ready
+# Make sure MySQL is ready
 MAX_TRIES=8
 CURRENT_TRY=1
 SLEEP_BETWEEN_TRY=4
-until [ "$(telnet mariadb 3306 | sed -n 2p)" = "Connected to mariadb." ] || [ "$CURRENT_TRY" -gt "$MAX_TRIES" ]; do
-    echo "Waiting for mariadb server..."
-    sleep "$SLEEP_BETWEEN_TRY"
-    CURRENT_TRY=$((CURRENT_TRY + 1))
+until [ "$(telnet de_mysql 3306 | sed -n 2p)" = "Connected to de_mysql." ] || [ "$CURRENT_TRY" -gt "$MAX_TRIES" ]; do
+   echo "Waiting for MySQL server (de_mysql)..."
+   sleep "$SLEEP_BETWEEN_TRY"
+   CURRENT_TRY=$((CURRENT_TRY + 1))
 done
 
 if [ "$CURRENT_TRY" -gt "$MAX_TRIES" ]; then
-  echo "WARNING: Timeout when waiting for mariadb."
+  echo "WARNING: Timeout when waiting for mysql."
 fi
 
 # Check if schema exists
