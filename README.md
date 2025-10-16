@@ -329,8 +329,6 @@ Distributed under the MIT License. See `LICENSE` for more information.
 
 **Truong An** - *Modern Data Stack Engineer*
 
-- GitHub: [@truongan](https://github.com/truongan)
-- LinkedIn: [Truong An](https://linkedin.com/in/truongan)
 
 ## 🙏 Acknowledgments
 
