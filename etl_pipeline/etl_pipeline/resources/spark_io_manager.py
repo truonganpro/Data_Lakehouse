@@ -5,8 +5,13 @@ import os
 
 class SparkIOManager(IOManager):
     def __init__(self, config=None):
+        # Ensure endpoint URL has proper protocol
+        endpoint_url = os.getenv("MINIO_ENDPOINT", "http://minio:9000")
+        if not endpoint_url.startswith("http"):
+            endpoint_url = f"http://{endpoint_url}"
+            
         default_config = {
-            "endpoint_url": os.getenv("MINIO_ENDPOINT", "http://minio:9000"),
+            "endpoint_url": endpoint_url,
             "minio_access_key": os.getenv("MINIO_ACCESS_KEY", "minio"),
             "minio_secret_key": os.getenv("MINIO_SECRET_KEY", "minio123"),
             "jdbc_jar_path": os.getenv("JDBC_JAR_PATH", "/opt/jars/mysql-connector-j-8.0.33.jar"),
@@ -21,6 +26,19 @@ class SparkIOManager(IOManager):
         if self._spark is None:
             jdbc_jar = self._config["jdbc_jar_path"]
             jars_dir = self._config["jars_dir"]
+            
+            # Validate required JARs exist
+            required_jars = [
+                ("JDBC jar", jdbc_jar),
+                ("Delta Core", os.path.join(jars_dir, "delta-core_2.12-2.3.0.jar")),
+                ("Delta Storage", os.path.join(jars_dir, "delta-storage-2.3.0.jar")),
+                ("Hadoop AWS", os.path.join(jars_dir, "hadoop-aws-3.3.2.jar")),
+                ("AWS SDK Bundle", os.path.join(jars_dir, "aws-java-sdk-bundle-1.11.1026.jar")),
+            ]
+            
+            for jar_name, jar_path in required_jars:
+                if not os.path.exists(jar_path):
+                    raise FileNotFoundError(f"Missing {jar_name}: {jar_path}")
 
             spark_jars = ",".join([
                 f"file://{jdbc_jar}",
@@ -44,11 +62,16 @@ class SparkIOManager(IOManager):
                 .config("spark.hadoop.fs.s3a.endpoint", self._config["endpoint_url"])
                 .config("spark.hadoop.fs.s3a.access.key", self._config["minio_access_key"])
                 .config("spark.hadoop.fs.s3a.secret.key", self._config["minio_secret_key"])
-                .config("spark.hadoop.fs.s3a.path.style.access", "true")
+                .config("spark.hadoop.fs.s3a.path.style-access", "true")
                 .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
                 .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false")
                 .config("spark.hadoop.fs.s3a.aws.credentials.provider", "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider")
                 .config("spark.sql.warehouse.dir", self._config["warehouse"])
+                # Hive Metastore configuration
+                .config("hive.metastore.uris", "thrift://hive-metastore:9083")
+                .config("spark.hadoop.hive.metastore.uris", "thrift://hive-metastore:9083")
+                .config("spark.sql.catalogImplementation", "hive")
+                .enableHiveSupport()
             )
 
             self._spark = builder.getOrCreate()
@@ -59,22 +82,42 @@ class SparkIOManager(IOManager):
         if len(full_path) < 2:
             raise ValueError("Unexpected asset_key.path: " + str(full_path))
 
-        layer = full_path[0]     # ví dụ: "bronze"
-        table = full_path[-1]    # ví dụ: "customer"
-        path = f"{self._config['warehouse']}{layer}/{table}"
+        layer = full_path[0]       # ví dụ: "bronze"
+        table = full_path[-1]      # ví dụ: "customer"
+        
+        # Use s3a:// for data writing (Spark/Hadoop compatible)
+        path_s3a = f"{self._config['warehouse']}{layer}/{table}"      # s3a://lakehouse/layer/table
+        # Use s3:// for metadata registration (Trino compatible)
+        path_s3 = path_s3a.replace("s3a://", "s3://", 1)             # s3://lakehouse/layer/table
+        db_loc_s3 = f"{self._config['warehouse'].replace('s3a://','s3://',1)}{layer}"
 
         spark = self._get_spark()
-        context.log.info(f"(SparkIOManager) Saving table: {layer}.{table} -> {path}")
+        context.log.info(f"(SparkIOManager) Saving table: {layer}.{table} -> {path_s3a}")
 
-        # Ghi delta trực tiếp ra MinIO
-        obj.write.format("delta").mode("overwrite").save(path)
+        # 1) Ghi file Delta vật lý ra MinIO (s3a)
+        obj.write.format("delta").mode("overwrite").save(path_s3a)
 
-        # Đăng ký vào Spark session để query được ngay
-        spark.sql(f"CREATE DATABASE IF NOT EXISTS {layer} LOCATION '{self._config['warehouse']}{layer}'")
-        spark.sql(f"CREATE TABLE IF NOT EXISTS {layer}.{table} USING DELTA LOCATION '{path}'")
+        # 2) Đăng ký metadata vào Hive Metastore với LOCATION dùng 's3://'
+        try:
+            # Create database with s3:// location
+            spark.sql(f"CREATE DATABASE IF NOT EXISTS {layer} LOCATION '{db_loc_s3}'")
+            
+            # Drop existing table if any (to avoid s3a:// vs s3:// conflicts)
+            spark.sql(f"DROP TABLE IF EXISTS {layer}.{table}")
+            
+            # Create table with s3:// location for Trino compatibility
+            spark.sql(f"CREATE TABLE {layer}.{table} USING DELTA LOCATION '{path_s3}'")
+            context.log.info(f"Successfully registered {layer}.{table} in Hive Metastore with s3:// location")
+            
+        except Exception as e:
+            context.log.warning(f"Failed to register in Hive Metastore: {e}")
+            # Fallback
+            spark.sql(f"CREATE DATABASE IF NOT EXISTS {layer}")
+            obj.write.format("delta").mode("overwrite").option("path", path_s3a).saveAsTable(f"{layer}.{table}")
 
         context.add_output_metadata({
-            "path": path,
+            "path_data": path_s3a,
+            "path_registered": path_s3,
             "rows": obj.count(),
             "columns": obj.columns,
         })

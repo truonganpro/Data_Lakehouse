@@ -130,15 +130,15 @@ def silver_product_category(context, bronze_product_category: DataFrame):
 
 
 @asset(
-    ins={"silver_order": AssetIn(key_prefix=["silver", "order"])},
+    ins={"bronze_order": AssetIn(key_prefix=["bronze", "order"])},
     io_manager_key="spark_io_manager",
     compute_kind=COMPUTE_KIND,
     key_prefix=[LAYER, "date"],
     group_name=LAYER,
 )
-def silver_date(context, silver_order: DataFrame):
+def silver_date(context, bronze_order: DataFrame):
     date_df = (
-        silver_order
+        bronze_order
         .select(F.col("order_purchase_timestamp").alias("ts"))
         .withColumn("full_date", F.to_date("ts"))
         .withColumn("year", F.year("ts"))

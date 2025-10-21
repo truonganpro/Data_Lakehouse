@@ -24,7 +24,7 @@ def load_mysql_table(context, table_name: str) -> DataFrame:
         url=jdbc_url,
         driver="com.mysql.cj.jdbc.Driver",
         dbtable=table_name,
-        user="admin",
+        user="root",
         password="admin123",
     ).load()
 
