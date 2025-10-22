@@ -101,7 +101,8 @@ dagster_home/logs/
 # ===========================================
 # 🔐 Environment & Secrets
 # ===========================================
-# Environment variables (keep template)
+# Environment variables (keep template only - env.example)
+.env
 .env.local
 .env.production
 .env.staging

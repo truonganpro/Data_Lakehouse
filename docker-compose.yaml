@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   # ========================
   # 🐬 MYSQL (Metastore)
@@ -13,8 +11,11 @@ services:
       - ./load_dataset_into_mysql:/docker-entrypoint-initdb.d:ro
     ports:
       - "3306:3306"
-    env_file:
-      - .env
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root123}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-metastore}
+      MYSQL_USER: ${MYSQL_USER:-hive}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-hive}
     networks:
       - de_network
     healthcheck:
@@ -61,8 +62,9 @@ services:
       - "9001:9001"
     volumes:
       - ./minio:/data
-    env_file:
-      - .env
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minio123}
     networks:
       - de_network
 
@@ -72,8 +74,6 @@ services:
     container_name: mc
     depends_on:
       - minio
-    env_file:
-      - .env
     entrypoint: >
       /bin/sh -c "
         until (/usr/bin/mc config host add minio http://minio:9000 minio minio123)
@@ -114,9 +114,11 @@ services:
     ports:
       - "3000:3000"
     environment:
-      # Metabase application database (SQLite for simplicity)
+      # Metabase application database (H2 for simplicity)
       MB_DB_TYPE: h2
       MB_DB_FILE: /metabase-data/metabase.db
+      # JVM options to fix SIGSEGV crash and improve stability
+      JAVA_OPTS: "-Xmx2g -Xms1g -XX:+UseG1GC -XX:MaxGCPauseMillis=500 -XX:+UseStringDeduplication -XX:+DisableExplicitGC"
       # Trino connection will be configured via UI
     depends_on:
       - trino
@@ -125,11 +127,18 @@ services:
       - metabase_data:/metabase-data
     networks:
       - de_network
+    deploy:
+      resources:
+        limits:
+          memory: 3g
+        reservations:
+          memory: 1g
     healthcheck:
       test: ["CMD", "curl", "--fail", "-I", "http://localhost:3000/api/health"]
-      interval: 15s
-      timeout: 5s
+      interval: 30s
+      timeout: 10s
       retries: 5
+      start_period: 60s
 
   # ========================
   # 🔥 SPARK CLUSTER
@@ -220,8 +229,6 @@ services:
     volumes:
       - ./jars:/opt/jars
       - ./dagster_home:/opt/dagster/dagster_home
-    env_file:
-      - .env
     depends_on:
       - spark-master
       - minio
@@ -238,8 +245,6 @@ services:
     container_name: de_dagster
     ports:
       - "5001:5000"
-    env_file:
-      - .env
     depends_on:
       - de_mysql
     networks:
@@ -259,8 +264,6 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./dagster_home:/opt/dagster/dagster_home
-    env_file:
-      - .env
     networks:
       - de_network
 
@@ -276,8 +279,6 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./dagster_home:/opt/dagster/dagster_home
-    env_file:
-      - .env
     networks:
       - de_network
 
