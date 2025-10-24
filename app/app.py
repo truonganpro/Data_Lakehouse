@@ -1,7 +1,7 @@
 import streamlit as st
 
 # Set page title
-st.title("ỨNG DỤNG MODERN DATA STACK XÂY DỰNG LAKEHOUSE HỖ TRỢ PHÂN TÍCH DỮ LIỆU BÁN HÀNG TRÊN AMAZON")
+st.title("ỨNG DỤNG MODERN DATA STACK XÂY DỰNG LAKEHOUSE CHO BRAZILIAN E-COMMERCE (OLIST)")
 
 # Description
 st.write("Welcome to the Streamlit App! Use the buttons below to navigate to different tools.")

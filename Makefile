@@ -30,10 +30,10 @@ rebuild:
 	docker compose --env-file .env build --no-cache
 	docker compose --env-file .env up -d --force-recreate
 
-# Connect to Postgres
-to_psql:
-	docker exec -it de_psql \
-		psql postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
+# Connect to Dagster MySQL database
+to_dagster_mysql:
+	docker exec -it de_mysql \
+		mysql --local-infile=1 -u"${DAGSTER_MYSQL_USERNAME}" -p"${DAGSTER_MYSQL_PASSWORD}" ${DAGSTER_MYSQL_DB}
 
 # Connect to MySQL (user)
 to_mysql:

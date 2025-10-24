@@ -11,17 +11,17 @@ scheduler:
     max_catchup_runs: 5
 
 storage:
-  postgres:
-    postgres_db:
+  mysql:
+    mysql_db:
       username:
-        env: DAGSTER_PG_USERNAME
+        env: DAGSTER_MYSQL_USERNAME
       password:
-        env: DAGSTER_PG_PASSWORD
+        env: DAGSTER_MYSQL_PASSWORD
       hostname:
-        env: DAGSTER_PG_HOSTNAME
+        env: DAGSTER_MYSQL_HOSTNAME
       db_name:
-        env: DAGSTER_PG_DB
-      port: 5432
+        env: DAGSTER_MYSQL_DB
+      port: 3306
 
 run_launcher:
   module: dagster.core.launcher

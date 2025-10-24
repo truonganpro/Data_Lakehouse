@@ -10,6 +10,7 @@ def log_shape(context, df: DataFrame, name: str):
 
 
 def load_mysql_table(context, table_name: str) -> DataFrame:
+    import os
     spark = context.resources.spark_io_manager._get_spark()
 
     jdbc_url = (
@@ -20,12 +21,20 @@ def load_mysql_table(context, table_name: str) -> DataFrame:
         "&allowPublicKeyRetrieval=true"
     )
 
+    # Use environment variables for credentials
+    mysql_user = os.getenv("MYSQL_USER", "root")
+    # If using root, get ROOT_PASSWORD; otherwise get MYSQL_PASSWORD
+    if mysql_user == "root":
+        mysql_password = os.getenv("MYSQL_ROOT_PASSWORD", "root123")
+    else:
+        mysql_password = os.getenv("MYSQL_PASSWORD", "hive")
+
     df = spark.read.format("jdbc").options(
         url=jdbc_url,
         driver="com.mysql.cj.jdbc.Driver",
         dbtable=table_name,
-        user="root",
-        password="admin123",
+        user=mysql_user,
+        password=mysql_password,
     ).load()
 
     log_shape(context, df, f"bronze_{table_name}")

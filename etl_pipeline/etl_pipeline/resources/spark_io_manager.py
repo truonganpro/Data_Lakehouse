@@ -62,8 +62,10 @@ class SparkIOManager(IOManager):
                 .config("spark.hadoop.fs.s3a.endpoint", self._config["endpoint_url"])
                 .config("spark.hadoop.fs.s3a.access.key", self._config["minio_access_key"])
                 .config("spark.hadoop.fs.s3a.secret.key", self._config["minio_secret_key"])
-                .config("spark.hadoop.fs.s3a.path.style-access", "true")
+                .config("spark.hadoop.fs.s3a.path.style.access", "true")
                 .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
+                # Map s3:// to s3a:// FileSystem (fix "No FileSystem for scheme s3")
+                .config("spark.hadoop.fs.s3.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
                 .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false")
                 .config("spark.hadoop.fs.s3a.aws.credentials.provider", "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider")
                 .config("spark.sql.warehouse.dir", self._config["warehouse"])
@@ -94,33 +96,44 @@ class SparkIOManager(IOManager):
         spark = self._get_spark()
         context.log.info(f"(SparkIOManager) Saving table: {layer}.{table} -> {path_s3a}")
 
-        # 1) Ghi file Delta vật lý ra MinIO (s3a)
-        obj.write.format("delta").mode("overwrite").save(path_s3a)
-
-        # 2) Đăng ký metadata vào Hive Metastore với LOCATION dùng 's3://'
         try:
-            # Create database with s3:// location
-            spark.sql(f"CREATE DATABASE IF NOT EXISTS {layer} LOCATION '{db_loc_s3}'")
-            
-            # Drop existing table if any (to avoid s3a:// vs s3:// conflicts)
-            spark.sql(f"DROP TABLE IF EXISTS {layer}.{table}")
-            
-            # Create table with s3:// location for Trino compatibility
-            spark.sql(f"CREATE TABLE {layer}.{table} USING DELTA LOCATION '{path_s3}'")
-            context.log.info(f"Successfully registered {layer}.{table} in Hive Metastore with s3:// location")
-            
-        except Exception as e:
-            context.log.warning(f"Failed to register in Hive Metastore: {e}")
-            # Fallback
-            spark.sql(f"CREATE DATABASE IF NOT EXISTS {layer}")
-            obj.write.format("delta").mode("overwrite").option("path", path_s3a).saveAsTable(f"{layer}.{table}")
+            # 1) Ghi file Delta vật lý ra MinIO (s3a)
+            row_count = obj.count()
+            obj.write.format("delta").mode("overwrite").save(path_s3a)
+            context.log.info(f"Successfully wrote {row_count} rows to {path_s3a}")
 
-        context.add_output_metadata({
-            "path_data": path_s3a,
-            "path_registered": path_s3,
-            "rows": obj.count(),
-            "columns": obj.columns,
-        })
+            # 2) Đăng ký metadata vào Hive Metastore với LOCATION dùng 's3://'
+            try:
+                # Create database with s3:// location
+                spark.sql(f"CREATE DATABASE IF NOT EXISTS {layer} LOCATION '{db_loc_s3}'")
+                
+                # Drop existing table if any (to avoid s3a:// vs s3:// conflicts)
+                spark.sql(f"DROP TABLE IF EXISTS {layer}.{table}")
+                
+                # Create table with s3:// location for Trino compatibility
+                spark.sql(f"CREATE TABLE {layer}.{table} USING DELTA LOCATION '{path_s3}'")
+                context.log.info(f"Successfully registered {layer}.{table} in Hive Metastore with s3:// location")
+                
+            except Exception as e:
+                context.log.warning(f"Failed to register in Hive Metastore: {e}")
+                # Fallback
+                try:
+                    spark.sql(f"CREATE DATABASE IF NOT EXISTS {layer}")
+                    obj.write.format("delta").mode("overwrite").option("path", path_s3a).saveAsTable(f"{layer}.{table}")
+                    context.log.info(f"Used fallback registration method for {layer}.{table}")
+                except Exception as fallback_error:
+                    context.log.error(f"Fallback registration also failed: {fallback_error}")
+                    raise
+
+            context.add_output_metadata({
+                "path_data": path_s3a,
+                "path_registered": path_s3,
+                "rows": row_count,
+                "columns": obj.columns,
+            })
+        except Exception as e:
+            context.log.error(f"Failed to save table {layer}.{table}: {str(e)}")
+            raise
 
     def load_input(self, context: InputContext) -> DataFrame:
         full_path = context.asset_key.path
@@ -136,8 +149,9 @@ class SparkIOManager(IOManager):
 
         try:
             df = spark.read.format("delta").load(path)
+            row_count = df.count()
+            context.log.info(f"Successfully loaded {row_count} rows from {path}")
+            return df
         except Exception as e:
-            context.log.warning(f"(SparkIOManager) Failed to load {path}, error: {e}")
+            context.log.error(f"(SparkIOManager) Failed to load {path}, error: {e}")
             raise
-
-        return df

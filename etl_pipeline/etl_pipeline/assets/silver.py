@@ -43,9 +43,18 @@ def silver_seller(context, bronze_seller: DataFrame):
     group_name=LAYER,
 )
 def silver_product(context, bronze_product: DataFrame):
-    cols_to_cast = ["product_description_length", "product_length_cm", "product_height_cm", "product_width_cm"]
+    cols_to_cast = ["product_description_lenght", "product_length_cm", "product_height_cm", "product_width_cm"]
     df = bronze_product.dropDuplicates().na.drop()
-    for col in cols_to_cast:
+    
+    # Rename columns with typo from Olist dataset to standardized names
+    if "product_description_lenght" in df.columns:
+        df = df.withColumnRenamed("product_description_lenght", "product_description_length")
+    if "product_name_lenght" in df.columns:
+        df = df.withColumnRenamed("product_name_lenght", "product_name_length")
+    
+    # Cast to int after renaming
+    cols_to_cast_renamed = ["product_description_length", "product_length_cm", "product_height_cm", "product_width_cm"]
+    for col in cols_to_cast_renamed:
         if col in df.columns:
             df = df.withColumn(col, F.col(col).cast("int"))
     log_shape(context, df, "silver_product")

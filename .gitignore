@@ -1,33 +1,9 @@
-# ===========================================
-# Modern Data Stack - Data Lakehouse Project
-# .gitignore file
-# ===========================================
+# Environment variables
+.env
+.env.local
+.env.*.local
 
-# ===========================================
-# 🐳 Docker & Container Data
-# ===========================================
-# MySQL data
-mysql/
-postgresql/
-metabase-data/
-
-# MinIO data (S3 buckets)
-minio/
-
-# Spark events and logs
-spark-events/
-spark/
-
-# ===========================================
-# 🐍 Python & Virtual Environment
-# ===========================================
-# Virtual environments
-myenv/
-venv/
-env/
-.venv/
-
-# Python cache
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
@@ -48,152 +24,59 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+MANIFEST
 
-# ===========================================
-# 📊 Jupyter Notebooks
-# ===========================================
-# Jupyter Notebook checkpoints
-.ipynb_checkpoints/
-*.ipynb_checkpoints/
+# Virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+myenv/
 
-# Jupyter Notebook outputs
-notebooks/work/metastore_db/
-notebooks/work/spark-warehouse/
-notebooks/work/derby.log
-
-# ===========================================
-# 🔧 IDE & Editor Files
-# ===========================================
-# macOS
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
-
-# VSCode
+# IDE
 .vscode/
-*.code-workspace
-
-# PyCharm
 .idea/
-*.iml
-*.iws
-*.ipr
-
-# ===========================================
-# 📝 Logs & Temporary Files
-# ===========================================
-# Log files
-logs/
-*.log
-dagster_home/logs/
-
-# Temporary files
-*.tmp
-*.temp
 *.swp
 *.swo
 *~
+.DS_Store
 
-# ===========================================
-# 🔐 Environment & Secrets
-# ===========================================
-# Environment variables (keep template only - env.example)
-.env
-.env.local
-.env.production
-.env.staging
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb_checkpoints/
 
-# Secrets
-secrets/
-*.pem
-*.key
-*.crt
+# Data directories
+mysql/
+postgresql/
+minio/
+dagster_home/storage/
+dagster_home/logs/
+dagster_home/history/
 
-# ===========================================
-# 📦 Package Managers
-# ===========================================
-# Node.js
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
+# JAR files (too large for git)
+jars/*.jar
+etl_pipeline/jars/*.jar
 
-# Python pip
-pip-log.txt
-pip-delete-this-directory.txt
-
-# ===========================================
-# 🗄️ Database Files
-# ===========================================
-# SQLite
-*.db
-*.sqlite
-*.sqlite3
-
-# ===========================================
-# 🧪 Testing
-# ===========================================
-# Coverage reports
-htmlcov/
-.coverage
-.coverage.*
-coverage.xml
-*.cover
-.hypothesis/
-.pytest_cache/
-
-# ===========================================
-# 📁 Project Specific
-# ===========================================
-# Keep these directories but ignore their contents
-warehouse/
-!warehouse/.gitkeep
-
-# Keep configuration files but ignore data
-!minio/.gitkeep
-!mysql/.gitkeep
-!postgresql/.gitkeep
-
-# Dataset files (too large for GitHub)
-brazilian-ecommerce/
+# CSV data files
+brazilian-ecommerce/*.csv
 *.csv
 
-# Large JAR files
-jars/aws-java-sdk-bundle-*.jar
+# Logs
+*.log
+logs/
+*.out
 
-# ===========================================
-# 🚀 Deployment & CI/CD
-# ===========================================
 # Docker
-.dockerignore
+docker-compose.override.yml
 
-# CI/CD
-.github/workflows/
-.gitlab-ci.yml
-.travis.yml
-.circleci/
+# Dagster
+.dagster/
+dagster_home/storage/
+dagster_home/schedules/
 
-# ===========================================
-# 📋 Documentation
-# ===========================================
-# Generated documentation
-docs/_build/
-site/
-
-# ===========================================
-# 🔄 Backup & Archive
-# ===========================================
-# Backup files
-*.bak
-*.backup
-*.old
-
-# Archive files
-*.zip
-*.tar.gz
-*.rar
-*.7z
+# Build artifacts
+*.egg
+*.egg-info/
+dist/
+build/

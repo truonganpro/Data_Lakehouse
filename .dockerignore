@@ -1,0 +1,51 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info
+dist
+build
+myenv/
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data directories (don't copy into images)
+mysql/
+minio/
+postgresql/
+dagster_home/compute_logs/
+dagster_home/storage/
+
+# Documentation
+*.md
+!README.md
+
+# Logs
+*.log
+
+# Brazilian e-commerce dataset
+brazilian-ecommerce/
+*.csv
+
+# Notebooks
+notebooks/work/
+

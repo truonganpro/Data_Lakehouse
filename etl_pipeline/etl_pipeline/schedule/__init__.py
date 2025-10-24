@@ -18,7 +18,7 @@ Crontab Syntax
 
 reload_data_schedule = ScheduleDefinition(
     job=reload_data,
-    cron_schedule="30 21 06 04 *",  # every day at midnight weekend day
+    cron_schedule="0 0 * * *",  # every day at 00:00
 )
 
 

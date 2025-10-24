@@ -1,0 +1,52 @@
+2025-10-23 17:00:51 +0000 - dagster - DEBUG - full_pipeline_job - c734110c-92f2-4d80-99f8-e6307027524f - 3036 - LOGS_CAPTURED - Started capturing logs in process (pid: 3036).
+2025-10-23 17:00:51 +0000 - dagster - DEBUG - full_pipeline_job - c734110c-92f2-4d80-99f8-e6307027524f - 3036 - silver__product__silver_product - STEP_START - Started execution of step "silver__product__silver_product".
+/usr/local/lib/python3.9/site-packages/pyspark/bin/load-spark-env.sh: line 68: ps: command not found
+Warning: Ignoring non-Spark config property: hive.metastore.uris
+Setting default log level to "WARN".
+To adjust logging level use sc.setLogLevel(newLevel). For SparkR, use setLogLevel(newLevel).
+2025-10-23 17:01:05 +0000 - dagster - INFO - full_pipeline_job - c734110c-92f2-4d80-99f8-e6307027524f - silver__product__silver_product - (SparkIOManager) Loading table: bronze.bronze_product from s3a://lakehouse/bronze/bronze_product
+[Stage 0:>                                                          (0 + 0) / 1][Stage 0:>                                                          (0 + 1) / 1][Stage 0:===========================================================(1 + 0) / 1]                                                                                [Stage 1:>                                                          (0 + 1) / 1][Stage 3:>                                                         (0 + 8) / 50][Stage 3:========>                                                 (7 + 8) / 50][Stage 3:=============>                                           (12 + 8) / 50][Stage 3:=================>                                       (15 + 8) / 50][Stage 3:==================>                                      (16 + 8) / 50][Stage 3:===================>                                     (17 + 9) / 50][Stage 3:====================>                                    (18 + 8) / 50][Stage 3:=====================>                                   (19 + 8) / 50][Stage 3:=========================>                               (22 + 8) / 50][Stage 3:==========================>                              (23 + 8) / 50][Stage 3:=============================>                           (26 + 8) / 50][Stage 3:==================================>                      (30 + 8) / 50][Stage 3:====================================>                    (32 + 8) / 50][Stage 3:=======================================>                 (35 + 9) / 50][Stage 3:============================================>            (39 + 8) / 50][Stage 3:===================================================>     (45 + 5) / 50][Stage 3:====================================================>    (46 + 4) / 50][Stage 3:=====================================================>   (47 + 3) / 50]                                                                                2025-10-23 17:02:55 +0000 - dagster - INFO - full_pipeline_job - c734110c-92f2-4d80-99f8-e6307027524f - silver__product__silver_product - Successfully loaded 32951 rows from s3a://lakehouse/bronze/bronze_product
+2025-10-23 17:02:55 +0000 - dagster - DEBUG - full_pipeline_job - c734110c-92f2-4d80-99f8-e6307027524f - 3036 - silver__product__silver_product - LOADED_INPUT - Loaded input "bronze_product" using input manager "spark_io_manager"
+2025-10-23 17:02:55 +0000 - dagster - DEBUG - full_pipeline_job - c734110c-92f2-4d80-99f8-e6307027524f - 3036 - silver__product__silver_product - STEP_INPUT - Got input "bronze_product" of type "DataFrame". (Type check passed).
+[Stage 8:===============================================>         (42 + 8) / 50]                                                                                [Stage 9:>                                                          (0 + 1) / 1]                                                                                2025-10-23 17:03:02 +0000 - dagster - INFO - full_pipeline_job - c734110c-92f2-4d80-99f8-e6307027524f - silver__product__silver_product - silver_product rows=32951 cols=9
+2025-10-23 17:03:02 +0000 - dagster - DEBUG - full_pipeline_job - c734110c-92f2-4d80-99f8-e6307027524f - 3036 - silver__product__silver_product - STEP_OUTPUT - Yielded output "result" of type "Any". (Type check passed).
+2025-10-23 17:03:02 +0000 - dagster - INFO - full_pipeline_job - c734110c-92f2-4d80-99f8-e6307027524f - silver__product__silver_product - (SparkIOManager) Saving table: silver.silver_product -> s3a://lakehouse/silver/silver_product
+[Stage 16:=============>                                          (12 + 8) / 50][Stage 16:======================>                                 (20 + 8) / 50][Stage 16:=======================>                                (21 + 8) / 50][Stage 16:==================================>                     (31 + 8) / 50][Stage 16:============================================>           (40 + 8) / 50][Stage 16:================================================>       (43 + 7) / 50]                                                                                [Stage 17:>                                                         (0 + 1) / 1][Stage 19:>                                                         (0 + 2) / 2][Stage 22:>                                                         (0 + 1) / 1]                                                                                [Stage 24:==========================================>             (38 + 8) / 50][Stage 24:============================================>           (40 + 0) / 50][Stage 24:============================================>           (40 + 8) / 50][Stage 24:============================================>           (40 + 2) / 50][Stage 23:>                                                         (0 + 1) / 1][Stage 24:>                                                        (0 + 8) / 10]ERROR:root:Exception while sending command.
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.9/site-packages/py4j/clientserver.py", line 516, in send_command
+    raise Py4JNetworkError("Answer from Java side is empty")
+py4j.protocol.Py4JNetworkError: Answer from Java side is empty
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.9/site-packages/py4j/java_gateway.py", line 1038, in send_command
+    response = connection.send_command(command)
+  File "/usr/local/lib/python3.9/site-packages/py4j/clientserver.py", line 539, in send_command
+    raise Py4JNetworkError(
+py4j.protocol.Py4JNetworkError: Error while sending or receiving
+2025-10-23 17:03:29 +0000 - dagster - ERROR - full_pipeline_job - c734110c-92f2-4d80-99f8-e6307027524f - silver__product__silver_product - Failed to save table silver.silver_product: An error occurred while calling o97.save
+2025-10-23 17:03:29 +0000 - dagster - ERROR - full_pipeline_job - c734110c-92f2-4d80-99f8-e6307027524f - 3036 - silver__product__silver_product - STEP_FAILURE - Execution of step "silver__product__silver_product" failed.
+
+dagster._core.errors.DagsterExecutionHandleOutputError: Error occurred while handling output "result" of step "silver__product__silver_product"::
+
+py4j.protocol.Py4JError: An error occurred while calling o97.save
+
+Stack Trace:
+  File "/usr/local/lib/python3.9/site-packages/dagster/_core/execution/plan/utils.py", line 54, in op_execution_error_boundary
+    yield
+  File "/usr/local/lib/python3.9/site-packages/dagster/_utils/__init__.py", line 482, in iterate_with_context
+    next_output = next(iterator)
+  File "/usr/local/lib/python3.9/site-packages/dagster/_core/execution/plan/execute_step.py", line 748, in _gen_fn
+    gen_output = output_manager.handle_output(output_context, output.value)
+  File "/opt/dagster/app/etl_pipeline/resources/spark_io_manager.py", line 102, in handle_output
+    obj.write.format("delta").mode("overwrite").save(path_s3a)
+  File "/usr/local/lib/python3.9/site-packages/pyspark/sql/readwriter.py", line 968, in save
+    self._jwrite.save(path)
+  File "/usr/local/lib/python3.9/site-packages/py4j/java_gateway.py", line 1321, in __call__
+    return_value = get_return_value(
+  File "/usr/local/lib/python3.9/site-packages/pyspark/sql/utils.py", line 190, in deco
+    return f(*a, **kw)
+  File "/usr/local/lib/python3.9/site-packages/py4j/protocol.py", line 334, in get_return_value
+    raise Py4JError(
+

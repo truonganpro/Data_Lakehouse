@@ -1,0 +1,52 @@
+2025-10-23 17:00:51 +0000 - dagster - DEBUG - full_pipeline_job - c734110c-92f2-4d80-99f8-e6307027524f - 3033 - LOGS_CAPTURED - Started capturing logs in process (pid: 3033).
+2025-10-23 17:00:51 +0000 - dagster - DEBUG - full_pipeline_job - c734110c-92f2-4d80-99f8-e6307027524f - 3033 - silver__orderitem__silver_order_item - STEP_START - Started execution of step "silver__orderitem__silver_order_item".
+/usr/local/lib/python3.9/site-packages/pyspark/bin/load-spark-env.sh: line 68: ps: command not found
+Warning: Ignoring non-Spark config property: hive.metastore.uris
+Setting default log level to "WARN".
+To adjust logging level use sc.setLogLevel(newLevel). For SparkR, use setLogLevel(newLevel).
+2025-10-23 17:01:05 +0000 - dagster - INFO - full_pipeline_job - c734110c-92f2-4d80-99f8-e6307027524f - silver__orderitem__silver_order_item - (SparkIOManager) Loading table: bronze.bronze_order_item from s3a://lakehouse/bronze/bronze_order_item
+[Stage 0:>                                                          (0 + 0) / 1][Stage 0:>                                                          (0 + 0) / 1][Stage 0:>                                                          (0 + 0) / 1][Stage 0:>                                                          (0 + 0) / 1][Stage 0:>                                                          (0 + 0) / 1][Stage 0:>                                                          (0 + 1) / 1]                                                                                [Stage 1:>                                                          (0 + 1) / 1][Stage 3:>                                                         (0 + 8) / 50][Stage 3:========>                                                 (7 + 8) / 50][Stage 3:=========>                                               (8 + 10) / 50][Stage 3:==================>                                      (16 + 8) / 50][Stage 3:======================>                                  (20 + 8) / 50][Stage 3:============================>                            (25 + 8) / 50][Stage 3:====================================>                    (32 + 8) / 50][Stage 3:======================================>                  (34 + 8) / 50][Stage 3:===============================================>         (42 + 8) / 50][Stage 3:=================================================>       (43 + 7) / 50][Stage 3:=======================================================> (49 + 1) / 50]                                                                                2025-10-23 17:07:11 +0000 - dagster - INFO - full_pipeline_job - c734110c-92f2-4d80-99f8-e6307027524f - silver__orderitem__silver_order_item - Successfully loaded 112650 rows from s3a://lakehouse/bronze/bronze_order_item
+2025-10-23 17:07:12 +0000 - dagster - DEBUG - full_pipeline_job - c734110c-92f2-4d80-99f8-e6307027524f - 3033 - silver__orderitem__silver_order_item - LOADED_INPUT - Loaded input "bronze_order_item" using input manager "spark_io_manager"
+2025-10-23 17:07:13 +0000 - dagster - DEBUG - full_pipeline_job - c734110c-92f2-4d80-99f8-e6307027524f - 3033 - silver__orderitem__silver_order_item - STEP_INPUT - Got input "bronze_order_item" of type "DataFrame". (Type check passed).
+[Stage 8:>                                                         (0 + 8) / 50][Stage 8:>                                                         (0 + 9) / 50][Stage 8:>                                                        (0 + 10) / 50][Stage 8:>                                                        (0 + 11) / 50][Stage 8:=>                                                       (1 + 10) / 50][Stage 8:====>                                                     (4 + 9) / 50][Stage 8:========>                                                 (7 + 9) / 50][Stage 8:=========>                                                (8 + 8) / 50][Stage 8:=========>                                                (8 + 9) / 50][Stage 8:===========>                                             (10 + 9) / 50][Stage 8:============>                                            (11 + 8) / 50][Stage 8:============>                                           (11 + 10) / 50][Stage 8:=============>                                           (12 + 9) / 50][Stage 8:==================>                                      (16 + 8) / 50][Stage 8:==================>                                      (16 + 0) / 50][Stage 8:==================>                                      (16 + 8) / 50][Stage 7:>                                                          (0 + 1) / 1][Stage 8:>                                                         (0 + 8) / 34][Stage 8:===========>                                              (7 + 8) / 34][Stage 8:================>                                        (10 + 9) / 34][Stage 8:================>                                       (10 + 10) / 34][Stage 8:==================>                                     (11 + 10) / 34][Stage 8:====================>                                    (12 + 9) / 34][Stage 8:===================>                                    (12 + 10) / 34]ERROR:root:Exception while sending command.
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.9/site-packages/py4j/clientserver.py", line 516, in send_command
+    raise Py4JNetworkError("Answer from Java side is empty")
+py4j.protocol.Py4JNetworkError: Answer from Java side is empty
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.9/site-packages/py4j/java_gateway.py", line 1038, in send_command
+    response = connection.send_command(command)
+  File "/usr/local/lib/python3.9/site-packages/py4j/clientserver.py", line 539, in send_command
+    raise Py4JNetworkError(
+py4j.protocol.Py4JNetworkError: Error while sending or receiving
+2025-10-23 17:07:51 +0000 - dagster - ERROR - full_pipeline_job - c734110c-92f2-4d80-99f8-e6307027524f - 3033 - silver__orderitem__silver_order_item - STEP_FAILURE - Execution of step "silver__orderitem__silver_order_item" failed.
+
+dagster._core.errors.DagsterExecutionStepExecutionError: Error occurred while executing op "silver__orderitem__silver_order_item"::
+
+py4j.protocol.Py4JError: An error occurred while calling o83.count
+
+Stack Trace:
+  File "/usr/local/lib/python3.9/site-packages/dagster/_core/execution/plan/utils.py", line 54, in op_execution_error_boundary
+    yield
+  File "/usr/local/lib/python3.9/site-packages/dagster/_utils/__init__.py", line 482, in iterate_with_context
+    next_output = next(iterator)
+  File "/usr/local/lib/python3.9/site-packages/dagster/_core/execution/plan/compute_generator.py", line 140, in _coerce_op_compute_fn_to_iterator
+    result = invoke_compute_fn(
+  File "/usr/local/lib/python3.9/site-packages/dagster/_core/execution/plan/compute_generator.py", line 128, in invoke_compute_fn
+    return fn(context, **args_to_pass) if context_arg_provided else fn(**args_to_pass)
+  File "/opt/dagster/app/etl_pipeline/assets/silver.py", line 92, in silver_order_item
+    log_shape(context, df, "silver_order_item")
+  File "/opt/dagster/app/etl_pipeline/assets/silver.py", line 9, in log_shape
+    context.log.info(f"{name} rows={df.count()} cols={len(df.columns)}")
+  File "/usr/local/lib/python3.9/site-packages/pyspark/sql/dataframe.py", line 804, in count
+    return int(self._jdf.count())
+  File "/usr/local/lib/python3.9/site-packages/py4j/java_gateway.py", line 1321, in __call__
+    return_value = get_return_value(
+  File "/usr/local/lib/python3.9/site-packages/pyspark/sql/utils.py", line 190, in deco
+    return f(*a, **kw)
+  File "/usr/local/lib/python3.9/site-packages/py4j/protocol.py", line 334, in get_return_value
+    raise Py4JError(
+
