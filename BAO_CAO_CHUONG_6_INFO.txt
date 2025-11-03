@@ -1,0 +1,1260 @@
+# THÔNG TIN BÁO CÁO CHƯƠNG 6 - DATA LAKEHOUSE PROJECT
+# Chức năng hệ thống & kiến thức kỹ thuật cần có
+
+================================================================================
+📌 6.1. TỔNG QUAN MODULE & VAI TRÒ NGƯỜI DÙNG
+================================================================================
+
+FILE: PROJECT_OVERVIEW.md (dòng 75-254)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🎯 HỆ THỐNG BAO GỒM 5 MODULES CHÍNH:
+
+1. ETL/ELT Pipeline (Dagster + Spark)
+2. BI Dashboard (Metabase)
+3. OLAP Query Window (Streamlit + Trino)
+4. AI-powered Chat (NL → SQL + RAG)
+5. Demand Forecasting / Monitoring (ML)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📊 6.1.1. ETL/ELT MEDALLION (DAGSTER + SPARK)
+
+Vai trò: Data Engineer
+Purpose: Tự động hóa data pipeline từ source → datamarts
+
+Technology:
+   • Dagster (Orchestration): Job scheduling, monitoring, lineage
+   • Apache Spark 3.3.2: Distributed processing
+   • Delta Lake 2.3.0: ACID storage
+   • Hive Metastore: Schema catalog
+   • MySQL: Source data
+
+Features:
+   ✅ Incremental loading (tăng dần)
+   ✅ Schema evolution (linh hoạt schema)
+   ✅ Data quality checks
+   ✅ Lineage tracking (theo dõi nguồn gốc)
+   ✅ Job scheduling (lập lịch)
+   ✅ Error handling & retry
+
+Jobs:
+   • reload_data: MySQL → Bronze (9 tables)
+   • full_pipeline_job: Bronze → Silver → Gold → Platinum (36 assets)
+
+Schedule:
+   • Daily 00:00 (bronze reload)
+   • Optional: Daily 03:00 (forecast)
+
+Access: http://localhost:3001 (Dagster UI)
+
+Performance:
+   • Bronze: ~2 min (9 tables)
+   • Silver: ~3 min (10 tables)
+   • Gold: ~2 min (10 tables)
+   • Platinum: ~1 min (7 tables)
+   • Total: ~8-10 min
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📊 6.1.2. BI DASHBOARD (METABASE)
+
+Vai trò: Business Analyst, Executive
+Purpose: Self-service analytics, dashboards, reports
+
+Technology:
+   • Metabase (Latest)
+   • Trino connector
+   • Visual query builder
+
+Features:
+   ✅ Drag-and-drop query builder
+   ✅ Pre-built dashboards
+   ✅ Custom SQL queries
+   ✅ Scheduled reports
+   ✅ Email alerts
+   ✅ Drill-down capabilities
+
+Sample Dashboards:
+   1. Executive Summary: Total GMV, Orders, AOV, Revenue trend
+   2. Sales Deep Dive: Category performance, Geographic distribution
+   3. Customer Analytics: Lifecycle funnel, Segmentation, Cohort analysis
+   4. Operations: Logistics SLA, Delivery metrics, Payment distribution
+   5. Product Intelligence: Bestsellers, Price bands, Category analysis
+
+Supported Schemas:
+   • bronze: Raw data (9 tables)
+   • silver: Cleaned data (10 tables)
+   • gold: Star schema (10 tables)
+   • platinum: Datamarts (7 tables + forecast)
+
+Access: http://localhost:3000
+
+Setup:
+   1. Create admin account
+   2. Add Database: Trino
+   3. Host: trino, Port: 8080
+   4. Database: lakehouse
+   5. Test connection → Save
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📊 6.1.3. OLAP QUERY WINDOW (TRINO)
+
+Vai trò: Data Analyst, Business Analyst
+Purpose: Ad-hoc multi-dimensional analysis không cần viết SQL
+
+Technology:
+   • Streamlit (UI Framework)
+   • Trino 414 (SQL Engine)
+   • Delta Lake (Data Source)
+
+Features:
+
+1. Multi-dimensional Analysis:
+   • Time grain: day/week/month/quarter/year
+   • Dimensions: product, customer, region, seller, category
+   • Measures: revenue, orders, units, AOV, GMV
+
+2. Advanced Aggregations:
+   • ROLLUP: Hierarchical totals
+   • GROUPING SETS: Custom aggregation levels
+   • NULLS LAST: Subtotals at the end
+
+3. Date Handling:
+   • Dynamic date range detection
+   • Olist coverage: 2016-09-04 → 2018-10-17
+   • Smart defaults: 6 months (month), 90 days (day)
+   • Safe filtering với half-open intervals
+
+4. Export:
+   • CSV download (numeric preserved)
+   • Excel download (proper types)
+   • Formatted timestamps
+
+5. Performance:
+   • Query caching (10 min TTL)
+   • Result limiting (configurable)
+   • Efficient SQL generation
+
+Supported Tables:
+   • gold.fact_order (96K rows)
+   • gold.fact_order_item (112K rows)
+   • platinum.dm_sales_monthly_category (1.3K rows)
+   • platinum.dm_customer_lifecycle (96K rows)
+   • platinum.dm_payment_mix (90 rows)
+   • platinum.dm_logistics_sla (574 rows)
+   • platinum.demand_forecast (ML predictions)
+
+Access: http://localhost:8501/📊_Query_Window
+
+Example Workflow:
+   1. Select schema + table
+   2. Choose time grain (month)
+   3. Add dimensions (product_category_name_english)
+   4. Select measures (SUM(gmv) AS revenue, COUNT(*) AS orders)
+   5. Set date range (last 6 months)
+   6. Add filters (optional)
+   7. Choose aggregation (ROLLUP/GROUPING SETS)
+   8. Click "Chạy truy vấn"
+   9. Export CSV/Excel
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📊 6.1.4. AI-POWERED CHAT (NL → SQL + RAG)
+
+Vai trò: Business Manager, Non-technical user
+Purpose: Query data bằng ngôn ngữ tự nhiên
+
+Technology:
+   • Streamlit (Frontend)
+   • FastAPI (Backend)
+   • Gemini AI (LLM)
+   • Qdrant (Vector DB)
+   • Trino (SQL Execution)
+
+Features:
+
+1. Natural Language to SQL:
+   • Intent recognition (Vietnamese & English)
+   • Template-based SQL generation
+   • LLM SQL generation (Gemini fallback)
+   • Safe query execution
+
+2. RAG (Retrieval-Augmented Generation):
+   • Document embeddings trong Qdrant
+   • KPI definitions retrieval
+   • Context-aware responses
+   • Citations & sources
+
+3. Session Management:
+   • Chat history per session
+   • Context preservation
+   • Query suggestions
+   • Reset chat
+
+4. Security:
+   • SQL safety validation
+   • Schema whitelisting (gold, platinum)
+   • Read-only enforcement
+   • LIMIT auto-append
+   • Timeout (45s)
+
+Example Queries:
+   • "Doanh thu tháng 3 năm 2018?"
+   • "Top 10 sản phẩm bán chạy nhất?"
+   • "Phương thức thanh toán nào phổ biến nhất?"
+   • "Tỷ lệ giao hàng đúng hạn?"
+
+Response Format:
+   1. Answer text (summarized)
+   2. SQL query (generated)
+   3. Data preview (50 rows)
+   4. Citations (RAG sources)
+   5. Execution time
+
+Access: http://localhost:8501/💬_Chat
+
+Limits:
+   • Max rows: 5,000
+   • Timeout: 45 seconds
+   • Preview: 50 rows
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📊 6.1.5. DEMAND FORECASTING / MONITORING
+
+Vai trò: Data Scientist, Supply Chain Manager
+Purpose: Dự báo nhu cầu sản phẩm 28 ngày với ML
+
+Technology:
+   • LightGBM (Gradient Boosting)
+   • MLflow (Experiment Tracking)
+   • PySpark (Feature Engineering)
+   • Delta Lake (Feature Store)
+
+Pipeline:
+   1. Feature Engineering:
+      gold.fact_order_item + gold.fact_order + gold.dim_customer
+      → silver.forecast_features
+      Features: lag 1/7/28, rolling MA 7/28, calendar, price
+
+   2. Model Training:
+      silver.forecast_features
+      → LightGBM model
+      → MLflow tracking (RMSE, MAE, sMAPE, R2)
+
+   3. Batch Prediction:
+      Recursive roll-forward prediction (28 horizons)
+      → platinum.demand_forecast
+
+   4. Monitoring:
+      Compare actuals vs forecasts
+      → platinum.forecast_monitoring
+
+Features:
+   ✅ Recursive forecasting (28 days)
+   ✅ Multi-product, multi-region
+   ✅ Confidence intervals (yhat_lo, yhat_hi)
+   ✅ Model versioning (MLflow)
+   ✅ Automated retraining (optional)
+   ✅ Performance monitoring
+
+Metrics:
+   • RMSE: Root Mean Square Error
+   • MAE: Mean Absolute Error
+   • sMAPE: Symmetric Mean Absolute Percentage Error
+   • R2: Coefficient of Determination
+
+Access: Dagster UI, Trino queries
+
+Execution:
+   ```bash
+   # Full forecast pipeline
+   make forecast-full
+   
+   # Or manual steps
+   make forecast-init     # Initialize MLflow
+   make forecast-features # Build features
+   make forecast-train    # Train model
+   make forecast-predict RUN_ID=<id> # Generate forecasts
+   ```
+
+Performance:
+   • Features: ~2 min
+   • Training: ~3-5 min
+   • Prediction: ~1-2 min
+   • Total: ~6-9 min
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+👥 USER ROLES & PERSONAS:
+
+1. Data Engineer:
+   • Primary: Dagster ETL pipeline
+   • Secondary: Spark monitoring, troubleshooting
+   • Use: ETL orchestration, data quality
+
+2. Data Analyst:
+   • Primary: Query Window, Metabase
+   • Secondary: Trino SQL queries
+   • Use: Ad-hoc analysis, dashboards
+
+3. Business Analyst:
+   • Primary: Metabase dashboards
+   • Secondary: Query Window exports
+   • Use: Regular reporting, insights
+
+4. Business Manager:
+   • Primary: Chat interface
+   • Secondary: Metabase dashboards
+   • Use: Quick answers, high-level metrics
+
+5. Data Scientist:
+   • Primary: Forecast pipeline
+   • Secondary: MLflow experiments
+   • Use: Model training, evaluation
+
+6. Supply Chain Manager:
+   • Primary: Forecast monitoring
+   • Secondary: Logistics SLA datamart
+   • Use: Inventory planning, optimization
+
+7. Executive:
+   • Primary: Metabase executive summary
+   • Use: KPIs, trends, strategic decisions
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📋 FILES LIÊN QUAN:
+   - PROJECT_OVERVIEW.md (dòng 75-254): All modules
+   - etl_pipeline/: ETL implementation
+   - app/pages/1_📊_Query_Window.py: OLAP UI
+   - app/pages/2_💬_Chat.py: Chat UI
+   - chat_service/main.py: Chat backend
+   - docs/chat_service_guide.md: Chat guide
+
+
+================================================================================
+📌 6.2. LUỒNG INPUT → PROCESS → OUTPUT CHO TỪNG MODULE
+================================================================================
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🔄 6.2.1. ETL PIPELINE
+
+INPUT:
+   • Source: MySQL (brazillian_ecommerce database)
+   • Tables: customers, orders, order_items, products, sellers, payments, reviews, geolocation, categories
+   • Format: Relational tables
+   • Size: ~100K orders
+
+PROCESS:
+   ┌──────────────┐
+   │   BRONZE     │ ← MySQL JDBC read (9 tables)
+   │  (Raw)       │
+   └──────┬───────┘
+          ↓
+   ┌──────────────┐
+   │   SILVER     │ ← Cleaning, deduplication, casting (10 tables)
+   │  (Clean)     │
+   └──────┬───────┘
+          ↓
+   ┌──────────────┐
+   │    GOLD      │ ← Star schema transformation (10 tables)
+   │ (Structured) │
+   └──────┬───────┘
+          ↓
+   ┌──────────────┐
+   │  PLATINUM    │ ← Business aggregations (7 datamarts)
+   │  (BI-Ready)  │
+   └──────────────┘
+
+OUTPUT:
+   • Location: s3a://lakehouse/{layer}/{table}/
+   • Format: Delta Lake (Parquet)
+   • Catalog: Hive Metastore
+   • Query: Trino
+
+Lineage Example:
+   MySQL.customers
+      ↓ (JDBC)
+   bronze.customer
+      ↓ (deduplication, NULL handling)
+   silver.customer
+      ↓ (enrichment, city_state)
+   gold.dimcustomer
+      ↓ (JOINs, aggregations)
+   platinum.dmsellerkpi, platinum.dmcustomerlifecycle
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🔄 6.2.2. BI DASHBOARD (METABASE)
+
+INPUT:
+   • Data: Trino catalog (lakehouse)
+   • Tables: gold.*, platinum.*
+   • Connection: Trino connector
+
+PROCESS:
+   User Request (Visual/Query)
+      ↓
+   Query Builder / SQL Editor
+      ↓
+   Trino Execution
+      ↓
+   Result Processing
+
+OUTPUT:
+   • Charts: Line, Bar, Table
+   • Dashboards: Multiple visualizations
+   • Reports: Scheduled emails
+   • Exports: CSV, Excel
+
+Example Flow:
+   User: "Show monthly revenue trend"
+      ↓
+   Metabase: Visual query builder
+      ↓
+   SQL: SELECT year_month, SUM(gmv) FROM platinum.dm_sales_monthly_category GROUP BY year_month
+      ↓
+   Trino: Executes on Delta Lake
+      ↓
+   Metabase: Displays line chart
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🔄 6.2.3. OLAP QUERY WINDOW
+
+INPUT:
+   • User selections: Schema, table, dimensions, measures
+   • Date range: start_date, end_date
+   • Options: Rollup, grouping sets, filters
+
+PROCESS:
+   build_sql() Function:
+      1. Detect date column type (VARCHAR vs DATE)
+      2. Build time grain expression
+      3. Build SELECT clause
+      4. Build WHERE clause (date-safe + partition pruning)
+      5. Build GROUP BY (ROLLUP/GROUPING SETS)
+      6. Build ORDER BY (NULLS LAST)
+      7. Add LIMIT
+
+OUTPUT:
+   • DataFrame: Query results
+   • Display: Preview table
+   • Export: CSV, Excel
+   • Cache: 10 minutes TTL
+
+Example Flow:
+   User:
+      • Table: platinum.dm_sales_monthly_category
+      • Time grain: month
+      • Dimensions: product_category_name_english
+      • Measures: SUM(gmv), COUNT(orders)
+      • Date: 2018-01 → 2018-06
+      • Aggregation: ROLLUP
+      ↓
+   
+   Streamlit: build_sql()
+      ↓
+   
+   SQL Generated:
+   ```sql
+   SELECT 
+     date_trunc('month', CAST(date_parse(year_month || '-01', '%Y-%m-%d') AS date)) AS month,
+     product_category_name_english,
+     SUM(gmv) AS gmv,
+     COUNT(orders) AS orders
+   FROM lakehouse.platinum.dmsalesmonthlycategory
+   WHERE year_month >= '2018-01' 
+     AND year_month <= '2018-06'
+     AND CAST(date_parse(year_month || '-01', '%Y-%m-%d') AS date) >= DATE '2018-01-01'
+     AND CAST(date_parse(year_month || '-01', '%Y-%m-%d') AS date) < DATE '2018-07-01'
+   GROUP BY ROLLUP (month, product_category_name_english)
+   ORDER BY 1 NULLS LAST, 2 NULLS LAST
+   ```
+      ↓
+   
+   Trino: Execute
+      ↓
+   
+   Results: Pivot table with subtotals
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🔄 6.2.4. AI-POWERED CHAT
+
+INPUT:
+   • User question: Natural language (Vietnamese/English)
+   • Session ID: UUID
+   • Context: Chat history
+
+PROCESS:
+   Multi-Tier SQL Generation:
+      1. Check HELP MODE (intent_to_sql)
+      2. Try old templates (backward compatibility)
+      3. Try router + skills (NEW)
+      4. Fallback Gemini LLM
+
+   SQL Safety:
+      1. Read-only check (SELECT/WITH)
+      2. Dangerous keyword detection
+      3. Schema whitelisting
+      4. LIMIT enforcement
+
+   RAG Search:
+      1. Embed query (Gemini)
+      2. Search Qdrant (k=4)
+      3. Retrieve relevant docs
+
+   Execution:
+      1. Run SQL on Trino
+      2. Fetch results (max 5000 rows)
+      3. Generate answer summary (Gemini)
+
+OUTPUT:
+   • Answer text: Summarized response
+   • SQL: Generated query
+   • Preview: First 50 rows
+   • Citations: RAG sources
+   • Execution time: ms
+
+Example Flow:
+   User: "Doanh thu tháng 3 năm 2018?"
+      ↓
+   
+   Router: Intent = revenue_query
+      ↓
+   
+   SQL Template:
+   ```sql
+   SELECT 
+     year_month,
+     SUM(gmv) AS revenue
+   FROM platinum.dm_sales_monthly_category
+   WHERE year_month = '2018-03'
+   GROUP BY year_month
+   LIMIT 200
+   ```
+      ↓
+   
+   Safety Check: ✅ Pass
+      ↓
+   
+   Trino: Execute → Results
+      ↓
+   
+   LLM: Format answer
+      ↓
+   
+   Response: "Doanh thu tháng 3 năm 2018 là $1,234,567"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🔄 6.2.5. DEMAND FORECASTING
+
+INPUT:
+   • Historical sales: gold.fact_order_item (112K rows)
+   • Customer data: gold.fact_order, gold.dim_customer
+   • Date range: 2016-09-04 → 2018-10-17
+
+PROCESS:
+   ┌─────────────────────┐
+   │ 1. Feature Build    │
+   ├─────────────────────┤
+   │ Input: fact_order_item, fact_order, dim_customer
+   │ Processing:
+   │   • Aggregate to daily level (date × product × region)
+   │   • Create features:
+   │     - lag_1, lag_7, lag_28
+   │     - roll7, roll28
+   │     - dow, month, is_weekend
+   │     - price, payment_type
+   │ Output: silver.forecast_features (~96K rows)
+   └───────────┬─────────┘
+               ↓
+   ┌─────────────────────┐
+   │ 2. Model Training   │
+   ├─────────────────────┤
+   │ Input: forecast_features
+   │ Processing:
+   │   • LightGBM gradient boosting
+   │   • 5-fold cross-validation
+   │   • Tune hyperparameters
+   │   • Target: y (revenue)
+   │ Output: Model artifact → MLflow
+   └───────────┬─────────┘
+               ↓
+   ┌─────────────────────┐
+   │ 3. Batch Prediction │
+   ├─────────────────────┤
+   │ Input: Trained model + latest features
+   │ Processing:
+   │   • Recursive roll-forward (28 horizons)
+   │   • Update features using previous yhat
+   │   • Generate confidence intervals
+   │ Output: platinum.demand_forecast
+   └───────────┬─────────┘
+               ↓
+   ┌─────────────────────┐
+   │ 4. Monitoring       │
+   ├─────────────────────┤
+   │ Input: Actuals + Forecasts
+   │ Processing:
+   │   • Calculate errors (abs_error, pct_error, sMAPE)
+   │   • Detect anomalies
+   │ Output: platinum.forecast_monitoring
+   └─────────────────────┘
+
+OUTPUT:
+   • Forecasts: 28-day horizon × products × regions
+   • Confidence intervals: yhat_lo, yhat_hi
+   • Model metrics: RMSE, MAE, sMAPE, R2
+   • Monitoring: Accuracy tracking
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📋 FILES LIÊN QUAN:
+   - etl_pipeline/etl_pipeline/assets/*.py: ETL flow
+   - app/pages/1_📊_Query_Window.py: Query Window flow
+   - app/pages/2_💬_Chat.py: Chat flow
+   - chat_service/main.py: Chat processing
+   - etl_pipeline/etl_pipeline/ml/*.py: Forecasting flow
+
+
+================================================================================
+📌 6.3. RUNBOOK VẬN HÀNH RÚT GỌN (KHỞI TẠO, CHẠY JOB, KIỂM TRA)
+================================================================================
+
+FILES: QUICK_START.md, Makefile, full_setup.sh, run_etl.sh
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🚀 KHỞI TẠO HỆ THỐNG
+
+Scenario: Deploy trên máy mới từ đầu
+
+Commands:
+   ```bash
+   # 1. Clone repository
+   git clone https://github.com/truonganpro/Data_Warehouse.git
+   cd Data_Warehouse
+
+   # 2. Automated setup (recommended)
+   chmod +x setup.sh
+   ./setup.sh
+
+   # Hoặc manual setup:
+   chmod +x download_jars.sh && ./download_jars.sh
+   cp env.example .env
+   docker-compose up -d
+   ```
+
+Expected Output:
+   ✅ All 14 services running
+   ✅ Health checks passed
+   ✅ Accessible via URLs
+
+Verification:
+   ```bash
+   docker-compose ps  # All should be "Up"
+   curl http://localhost:8501/_stcore/health
+   curl http://localhost:8001/health
+   ```
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📊 CHẠY ETL JOB
+
+Scenario: Load data và chạy pipeline
+
+Commands:
+
+Option A - Using Makefile:
+   ```bash
+   # Bronze layer only
+   make etl_bronze
+   
+   # Full pipeline (all layers)
+   # Note: Chỉ bronze hiện được define trong Makefile
+   ```
+
+Option B - Using Dagster UI:
+   1. Open http://localhost:3001
+   2. Jobs → reload_data (hoặc full_pipeline_job)
+   3. Launch Run
+   4. Monitor progress
+
+Option C - Using Docker exec:
+   ```bash
+   # Bronze
+   docker exec etl_pipeline dagster job execute -m etl_pipeline -j reload_data
+   
+   # Full (nếu có)
+   docker exec etl_pipeline dagster job execute -m etl_pipeline -j full_pipeline_job
+   ```
+
+Expected Output:
+   ✅ Bronze: 9 assets materialized
+   ✅ Silver: 10 assets materialized
+   ✅ Gold: 10 assets materialized
+   ✅ Platinum: 7 assets materialized
+
+Verification:
+   ```bash
+   # Check Trino
+   docker exec trino trino --execute "SHOW SCHEMAS FROM lakehouse;"
+   docker exec trino trino --execute "SHOW TABLES FROM lakehouse.bronze;"
+   docker exec trino trino --execute "SELECT COUNT(*) FROM lakehouse.bronze.customer;"
+   ```
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🔮 CHẠY FORECAST PIPELINE
+
+Commands:
+   ```bash
+   # Full automated pipeline
+   ./run_forecast_pipeline.sh
+   
+   # Or step-by-step with Makefile
+   make forecast-init      # Initialize MLflow
+   make forecast-features  # Build features
+   make forecast-train     # Train model (save run_id)
+   make forecast-predict RUN_ID=<run_id>  # Generate forecasts
+   
+   # Via Dagster
+   make forecast-full
+   ```
+
+Verification:
+   ```bash
+   # Check forecast tables
+   make forecast-check
+   
+   # Query results
+   docker exec trino trino --execute "SELECT * FROM lakehouse.platinum.demand_forecast LIMIT 10;"
+   ```
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🔍 KIỂM TRA HỆ THỐNG
+
+Health Checks:
+   ```bash
+   # All services status
+   docker-compose ps
+
+   # Service health endpoints
+   curl http://localhost:8501/_stcore/health  # Streamlit
+   curl http://localhost:8001/health          # Chat Service
+   curl http://localhost:3000/api/health      # Metabase
+   ```
+
+Logs Monitoring:
+   ```bash
+   # All services
+   docker-compose logs -f
+   
+   # Specific service
+   docker-compose logs -f streamlit
+   docker-compose logs -f etl_pipeline
+   docker-compose logs -f chat_service
+   docker-compose logs -f spark-master
+   
+   # Last 100 lines
+   docker-compose logs --tail=100 etl_pipeline
+   ```
+
+Data Verification:
+   ```bash
+   # MySQL source data
+   docker exec de_mysql mysql -uroot -padmin123 -e \
+     "SELECT COUNT(*) FROM brazillian_ecommerce.customers;"
+   
+   # Trino data
+   docker exec trino trino --execute "SELECT COUNT(*) FROM lakehouse.gold.fact_order;"
+   
+   # MinIO storage
+   docker exec mc mc ls minio/lakehouse/
+   ```
+
+Storage Check:
+   ```bash
+   # MinIO console
+   open http://localhost:9001  # minio/minio123
+   
+   # Trino tables
+   docker exec trino trino
+   # In Trino CLI:
+   USE lakehouse.gold;
+   SHOW TABLES;
+   DESCRIBE fact_order;
+   ```
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🛠️ TROUBLESHOOTING COMMANDS
+
+Services Not Starting:
+   ```bash
+   # Check logs
+   docker-compose logs -f
+   
+   # Restart specific service
+   docker-compose restart streamlit
+   
+   # Rebuild and restart
+   docker-compose down
+   docker-compose build --no-cache
+   docker-compose up -d
+   ```
+
+ETL Job Failed:
+   ```bash
+   # Check Dagster logs
+   docker-compose logs de_dagster_daemon
+   
+   # Check ETL pipeline logs
+   docker-compose logs etl_pipeline
+   
+   # Manual retry
+   docker exec etl_pipeline dagster job execute -m etl_pipeline -j reload_data
+   ```
+
+Query Errors:
+   ```bash
+   # Test Trino connection
+   docker exec trino trino --execute "SHOW CATALOGS;"
+   
+   # Test query
+   docker exec trino trino --execute "SELECT COUNT(*) FROM lakehouse.bronze.customer;"
+   ```
+
+MinIO Connection Issues:
+   ```bash
+   # Check MinIO
+   docker exec minio mc ls minio/lakehouse/
+   
+   # Test from Spark
+   docker exec spark-master python3 \
+     /opt/bitnami/spark/test_spark_minio_connection.py
+   ```
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📋 FILES LIÊN QUAN:
+   - Makefile: Operational commands
+   - full_setup.sh: Complete setup
+   - run_etl.sh: ETL execution
+   - run_forecast_pipeline.sh: Forecast execution
+   - QUICK_START.md: Quick reference
+   - README.md: Troubleshooting section
+
+
+================================================================================
+📌 6.4. BẢO ĐẢM CHẤT LƯỢNG & AN TOÀN TRUY VẤN
+================================================================================
+
+FILES:
+   - chat_service/main.py: SQL safety implementation
+   - chat_service/ast_guard.py: AST validation
+   - app/pages/1_📊_Query_Window.py: Filter validation
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🔒 SQL SAFETY MECHANISMS
+
+1. READ-ONLY ENFORCEMENT:
+   Pattern: `^\s*(SELECT|WITH)\b` (regex)
+   Action: Reject nếu không phải SELECT/WITH
+   Implementation:
+   ```python
+   if not READONLY_PATTERN.match(sql):
+       raise ValueError("Only SELECT queries allowed")
+   ```
+
+2. DANGEROUS KEYWORD BLACKLIST:
+   Banned: DROP, TRUNCATE, INSERT, UPDATE, DELETE, CALL, CREATE, ALTER
+   Detection: AST parsing (sqlglot) + regex fallback
+   Implementation:
+   ```python
+   def _check_dangerous_keywords_with_ast(sql: str):
+       # Use sqlglot to parse
+       # Check expression types
+       # Report violations
+   ```
+
+3. SCHEMA WHITELISTING:
+   Allowed: gold, platinum
+   Validation: Parse AST, extract schemas, verify
+   Implementation:
+   ```python
+   def _parse_sql_schemas(sql: str) -> Set[str]:
+       # Parse with sqlglot
+       # Extract from table.db
+       # Return set of schemas
+   
+   if not schemas.issubset(SQL_WHITELIST_SCHEMAS):
+       raise ValueError("Schema not whitelisted")
+   ```
+
+4. LIMIT ENFORCEMENT:
+   Default: 200 rows
+   Maximum: 5000 rows
+   Auto-append: Nếu LIMIT không có
+   Implementation:
+   ```python
+   if "LIMIT" not in sql.upper():
+       sql = f"{sql.rstrip(';')} LIMIT {SQL_DEFAULT_LIMIT}"
+   ```
+
+5. TIMEOUT:
+   Default: 45 seconds
+   Kill: Long-running queries
+   Implementation: Trino query_max_run_time
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🔍 DATA QUALITY CHECKS
+
+Silver Layer Quality:
+   1. Deduplication: dropDuplicates() on primary keys
+   2. NULL Handling: na.drop(), na.fill(), isNotNull()
+   3. Type Casting: String → INT, DOUBLE, TIMESTAMP
+   4. Precision Control: Round(2) for monetary values
+   5. Data Validation: Geographic bounds, timestamp conversion
+
+Gold Layer Quality:
+   1. Referential Integrity: JOIN ensures FK relationships
+   2. Aggregate Validation: SUM, COUNT, AVG correctness
+   3. Business Logic: Boolean flags, computed fields
+
+Platinum Layer Quality:
+   1. Aggregation Accuracy: GROUP BY correctness, DISTINCT counts
+   2. Measure Calculations: AOV = GMV/Orders, rates, rankings
+
+Logging & Monitoring:
+   ```python
+   # Row counts logged
+   context.log.info(f"{name} rows={df.count()} cols={len(df.columns)}")
+   
+   # Metadata output
+   context.add_output_metadata({
+       "rows": row_count,
+       "columns": obj.columns,
+       "path_data": path_s3a,
+   })
+   ```
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📝 AUDIT LOGGING
+
+MySQL Schema (chatlogs database):
+   • conversations: Chat history, questions, answers
+   • sql_audit: SQL queries, execution metrics, errors
+
+Features:
+   • Session tracking per user
+   • SQL masking (literals → ?)
+   • Execution metrics (time, rows, success)
+   • Error tracking
+   • Timestamps for audit trail
+
+Privacy Protection:
+   ```python
+   def _mask_sql_literals(sql: str) -> str:
+       # 'data' → '?'
+       masked = re.sub(r"'([^']*)'", "'?'", sql)
+       # 123 → ?
+       masked = re.sub(r"\b\d+(\.\d+)?\b", "?", masked)
+       return masked
+   ```
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📋 FILES LIÊN QUAN:
+   - chat_service/main.py: SQL safety implementation
+   - chat_service/ast_guard.py: AST validation
+   - load_dataset_into_mysql/02_init_chatlogs.sql: Audit schema
+   - etl_pipeline/etl_pipeline/assets/silver.py: Quality checks
+
+
+================================================================================
+📌 6.5. GIÁ TRỊ THỰC TIỄN CHO LÃNH ĐẠO & PHÒNG BAN
+================================================================================
+
+FILE: PROJECT_OVERVIEW.md (dòng 501-595)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+💼 BUSINESS VALUE
+
+1. TỰ ĐỘNG HÓA BÁO CÁO:
+   ❌ Before: Manual Excel, 2-3 ngày mỗi tuần
+   ✅ After: Automated ETL daily, real-time dashboards
+   Impact: 80% giảm thời gian báo cáo, 0 lỗi nhập liệu
+
+2. DỰ BÁO CHÍNH XÁC:
+   ❌ Before: Rule-based forecasting, 20-30% error
+   ✅ After: ML forecasts với 10-15% error, confidence intervals
+   Impact: Giảm inventory cost 15%, tăng fill rate 10%
+
+3. DECISION-MAKING NHANH HƠN:
+   ❌ Before: IT phải viết SQL, 1-2 ngày
+   ✅ After: Self-service analytics, < 1 phút
+   Impact: Business users độc lập, IT tập trung strategic work
+
+4. DATA QUALITY TỐT HƠN:
+   ❌ Before: Inconsistent data, nhiều NULL
+   ✅ After: Automated validation, clean data
+   Impact: Tin cậy vào insights, giảm rework
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📊 USE CASE 1: EXECUTIVE DASHBOARD
+
+Scenario: CEO muốn xem tổng quan monthly
+
+User: Executive
+Tool: Metabase Dashboard
+
+Input:
+   • Executive Summary Dashboard
+   • Auto-refresh daily
+
+Output:
+   • Total GMV: $XXM (↑ 15% YoY)
+   • Total Orders: XXK
+   • AOV: $XX
+   • Revenue trend (chart)
+   • Top 5 categories (chart)
+
+Value:
+   ✅ Quick decision: Invest more vào top categories
+   ✅ Strategic planning: Budget allocation
+   ✅ Performance monitoring: Growth tracking
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📊 USE CASE 2: DEMAND FORECASTING
+
+Scenario: Supply Chain Manager plan inventory
+
+User: Supply Chain Manager
+Tool: Forecast Pipeline + Dashboards
+
+Input:
+   • Historical sales (2 years)
+   • Product catalog (32K products)
+   • Regional data
+
+Output:
+   • 28-day forecasts per product × region
+   • Confidence intervals (yhat_lo, yhat_hi)
+   • Monitoring accuracy (sMAPE, RMSE)
+
+Value:
+   ✅ Reduce stockouts: 25% improvement
+   ✅ Optimize inventory: 15% cost reduction
+   ✅ Improve fill rate: 10% increase
+   ✅ Better cash flow: Lower carrying cost
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📊 USE CASE 3: SALES ANALYSIS
+
+Scenario: Sales Manager phân tích trend theo category
+
+User: Sales Manager
+Tool: Query Window (OLAP)
+
+Input:
+   • Table: platinum.dm_sales_monthly_category
+   • Time: Last 12 months
+   • Dimensions: product_category_name_english
+   • Measures: GMV, Orders, AOV
+
+Output:
+   • Pivot table với ROLLUP totals
+   • Excel export
+   • Trend analysis
+
+Value:
+   ✅ Identify growth categories: Focus marketing
+   ✅ AOV optimization: Bundle strategies
+   ✅ Budget allocation: Data-driven decisions
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📊 USE CASE 4: CUSTOMER INSIGHTS
+
+Scenario: Marketing Manager phân tích retention
+
+User: Marketing Manager
+Tool: Chat Interface
+
+Input:
+   • Question: "Customer retention rate by cohort?"
+
+Output:
+   • Cohort table
+   • Retention rates
+   • Recommendations
+
+Value:
+   ✅ Target campaigns: Specific cohorts
+   ✅ Reduce churn: 20% improvement
+   ✅ Increase LTV: Better segmentation
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📊 USE CASE 5: OPERATIONS OPTIMIZATION
+
+Scenario: Operations Manager tối ưu logistics
+
+User: Operations Manager
+Tool: Logistics SLA Datamart
+
+Input:
+   • Table: platinum.dm_logistics_sla
+   • Metrics: on_time_rate, avg_delivered_days
+
+Output:
+   • Regional performance
+   • Bottleneck identification
+   • Delivery trends
+
+Value:
+   ✅ Improve on-time rate: 15% increase
+   ✅ Cost reduction: Route optimization
+   ✅ Customer satisfaction: Faster delivery
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📊 USE CASE 6: PAYMENT ANALYSIS
+
+Scenario: Finance Manager phân tích payment methods
+
+User: Finance Manager
+Tool: Payment Mix Datamart
+
+Input:
+   • Table: platinum.dm_payment_mix
+   • Focus: credit_card usage
+
+Output:
+   • Payment distribution
+   • Trends over time
+   • Installment patterns
+
+Value:
+   ✅ Optimize payment fees: Negotiate rates
+   ✅ Risk management: Fraud detection
+   ✅ Cash flow planning: Predict timing
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🎯 ROI ESTIMATION
+
+Time Savings:
+   • IT team: 10 hours/week → 2 hours/week (80% reduction)
+   • Business users: 5 hours/week → 30 min/week (90% reduction)
+   • Total: 1,300 hours/year saved
+
+Cost Savings:
+   • Reduced inventory waste: $50K/year
+   • Optimized logistics: $30K/year
+   • Decreased manual errors: $20K/year
+   • Total: ~$100K/year
+
+Revenue Impact:
+   • Better forecasting: +5% fill rate → +$200K revenue
+   • Data-driven decisions: +10% AOV → +$150K revenue
+   • Reduced churn: +$100K revenue
+   • Total: ~$450K/year
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📋 FILES LIÊN QUAN:
+   - PROJECT_OVERVIEW.md (dòng 501-595): Use cases
+   - README.md: Business value section
+
+
+================================================================================
+📌 6.6. TIỂU KẾT CHƯƠNG
+================================================================================
+
+📝 ĐIỂM CHÍNH CẦN TÓM TẮT:
+
+✅ TỔNG QUAN MODULES:
+   • 5 modules: ETL, BI, OLAP, Chat, Forecasting
+   • 7 user personas: Engineer, Analyst, Manager, Scientist, etc.
+   • Purpose: Từ raw data → business insights
+
+✅ INPUT → OUTPUT FLOWS:
+   • ETL: MySQL → Bronze → Silver → Gold → Platinum
+   • BI: Trino queries → Dashboards
+   • OLAP: UI selections → Pivot tables
+   • Chat: NL → SQL → Answers
+   • Forecast: Historical → ML → Predictions
+
+✅ RUNBOOK:
+   • 1 command deployment (setup.sh)
+   • Automated ETL daily
+   • Manual override khi cần
+   • Comprehensive health checks
+
+✅ QUALITY & SECURITY:
+   • SQL safety (read-only, whitelist, LIMIT)
+   • Data quality (dedupe, validation, casting)
+   • Audit logging (privacy, compliance)
+   • Performance optimization
+
+✅ BUSINESS VALUE:
+   • ROI: ~$550K/year (cost savings + revenue)
+   • Time savings: 1,300 hours/year
+   • Decision speed: Real-time vs 1-2 days
+   • Accuracy: 15-20% improvement
+
+🎯 THÀNH QUẢ:
+   Production-ready Data Lakehouse với:
+   • 5 functional modules
+   • 7 datamarts
+   • 36 ETL assets
+   • AI-powered analytics
+   • ML forecasting
+
+📊 KẾT QUẢ:
+   Business users tự do, IT tập trung strategic work
+   Data quality tốt, insights đáng tin cậy
+   Forecasting chính xác, inventory tối ưu
+
+================================================================================
+📁 DANH SÁCH FILE CẦN ĐỌC ĐỂ VIẾT BÁO CÁO
+================================================================================
+
+MUST READ:
+   1. PROJECT_OVERVIEW.md (full)
+   2. app/pages/1_📊_Query_Window.py: OLAP interface
+   3. app/pages/2_💬_Chat.py: Chat interface
+   4. chat_service/main.py: Chat backend
+   5. chat_service/ast_guard.py: Security
+   6. docs/chat_service_guide.md: Chat guide
+   7. etl_pipeline/etl_pipeline/ml/*.py: Forecasting
+   8. Makefile: Operations
+
+NICE TO HAVE:
+   9. QUICK_START.md: Quick reference
+   10. README.md: Use cases
+   11. full_setup.sh: Setup automation
+   12. run_forecast_pipeline.sh: Forecast automation
+
+================================================================================
+EOF
+
+
