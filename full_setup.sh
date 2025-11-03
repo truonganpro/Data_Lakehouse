@@ -177,7 +177,7 @@ docker cp brazilian-ecommerce/ de_mysql:/tmp/dataset/ 2>/dev/null || {
 
 echo "  → Copying SQL scripts..."
 docker cp load_dataset_into_mysql/01_olist.sql de_mysql:/tmp/olist.sql
-docker cp load_dataset_into_mysql/load_data.sql de_mysql:/tmp/load_data.sql
+docker cp load_dataset_into_mysql/03_load_data.sql de_mysql:/tmp/load_data.sql
 
 echo "  → Creating database schema..."
 docker exec de_mysql mysql -uroot -padmin123 -e "SET GLOBAL local_infile=1;" 2>/dev/null || true

@@ -90,24 +90,52 @@ Metabase (http://localhost:3000)
 - 8GB RAM trở lên
 - 20GB dung lượng trống
 
-### Quick Start
+### Quick Start (Automated Setup)
+
+**Recommended for first-time setup:**
 
 ```bash
 # 1. Clone repository
 git clone <repository-url>
 cd Data_Warehouse_Fresh
 
-# 2. Download JAR dependencies
+# 2. Run automated setup script
+chmod +x setup.sh
+./setup.sh
+```
+
+Script sẽ tự động:
+- ✅ Kiểm tra yêu cầu hệ thống (Docker, disk space, RAM)
+- ✅ Tạo file `.env` từ `env.example`
+- ✅ Download JAR dependencies
+- ✅ Build Docker images
+- ✅ Khởi động tất cả services
+- ✅ Tải dataset (nếu có)
+- ✅ Chạy ETL pipeline
+- ✅ Kiểm tra health của services
+
+### Alternative Setup Methods
+
+**Option 1: Using full_setup.sh**
+```bash
+chmod +x full_setup.sh
+./full_setup.sh --fresh    # Fresh install (remove volumes, rebuild all)
+```
+
+**Option 2: Manual setup**
+```bash
+# 1. Download JAR dependencies
 chmod +x download_jars.sh
 ./download_jars.sh
 
-# 3. Khởi động hệ thống (tự động tạo .env nếu chưa có)
-chmod +x start_and_test.sh
-./start_and_test.sh
+# 2. Create .env file
+cp env.example .env
 
-# Hoặc sử dụng docker-compose trực tiếp
+# 3. Start all services
 docker-compose up -d
 ```
+
+**Note:** Cần chỉnh sửa `.env` file trước khi chạy để thêm Google API Key nếu muốn sử dụng Chat Service.
 
 ### Kiểm tra trạng thái
 
@@ -121,15 +149,15 @@ docker-compose logs -f [service_name]
 
 ### Truy cập các giao diện
 
-| Service | URL | Credentials |
-|---------|-----|-------------|
-| **Spark Master UI** | http://localhost:8080 | - |
-| **MinIO Console** | http://localhost:9001 | minio/minio123 |
-| **Metabase** | http://localhost:3000 | Setup on first access |
-| **Trino** | http://localhost:8082 | - |
-| **Dagster** | http://localhost:3001 | - |
-| **Streamlit** | http://localhost:8501 | - |
-| **Jupyter Notebook** | http://localhost:8888 | - |
+| Service | URL | Credentials / Notes |
+|---------|-----|---------------------|
+| **🚀 Streamlit App** | http://localhost:8501 | Main dashboard & UI |
+| **📊 Metabase BI** | http://localhost:3000 | Setup on first access |
+| **🎯 Dagster UI** | http://localhost:3001 | ETL orchestration |
+| **⚡ Spark Master** | http://localhost:8080 | Spark cluster UI |
+| **🪣 MinIO Console** | http://localhost:9001 | minio/minio123 |
+| **🔍 Trino** | http://localhost:8082 | SQL query engine |
+| **💬 Chat Service** | http://localhost:8001 | AI Chatbot API |
 
 ---
 
@@ -330,7 +358,7 @@ spark.hadoop.fs.s3a.access.key=minio
 spark.hadoop.fs.s3a.secret.key=minio123
 spark.hadoop.fs.s3a.path.style.access=true
 
-# Warehouse
+# Lakehouse Storage
 spark.sql.warehouse.dir=s3a://lakehouse/
 ```
 

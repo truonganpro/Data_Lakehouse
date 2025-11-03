@@ -78,9 +78,7 @@ services:
       /bin/sh -c "
         until (/usr/bin/mc config host add minio http://minio:9000 minio minio123)
         do echo '...waiting...' && sleep 1; done;
-        /usr/bin/mc mb minio/warehouse || true;
         /usr/bin/mc mb minio/lakehouse || true;
-        /usr/bin/mc policy set public minio/warehouse;
         /usr/bin/mc policy set public minio/lakehouse;
         exit 0;
       "
@@ -140,6 +138,8 @@ services:
     environment:
       - SPARK_MODE=master
       - SPARK_CLASSPATH=/opt/jars/*
+      - SPARK_JARS_DIR=/opt/jars
+      - SPARK_DIST_CLASSPATH=/opt/jars/*
     ports:
       - "7077:7077"
       - "8080:8080"
@@ -156,6 +156,8 @@ services:
       - SPARK_MODE=worker
       - SPARK_MASTER_URL=spark://spark-master:7077
       - SPARK_CLASSPATH=/opt/jars/*
+      - SPARK_JARS_DIR=/opt/jars
+      - SPARK_DIST_CLASSPATH=/opt/jars/*
     depends_on:
       - spark-master
     ports:
@@ -196,6 +198,10 @@ services:
     volumes:
       - ./jars:/opt/jars
       - ./dagster_home:/opt/dagster/dagster_home
+    environment:
+      - JARS_DIR=/opt/jars
+      - SPARK_DIST_CLASSPATH=/opt/jars/*
+      - DAGSTER_HOME=/opt/dagster/dagster_home
     env_file:
       - .env
     depends_on:
@@ -256,6 +262,71 @@ services:
       - .env
     networks:
       - de_network
+
+  # ============================================================================
+  # Chat Service (SQL + RAG Chatbot)
+  # ============================================================================
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: qdrant
+    ports:
+      - "6333:6333"
+    volumes:
+      - ./qdrant_data:/qdrant/storage
+    networks:
+      - de_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  chat_service:
+    build:
+      context: ./chat_service
+      dockerfile: Dockerfile
+    container_name: chat_service
+    ports:
+      - "8001:8001"
+    environment:
+      # LLM & Embedding Providers
+      LLM_PROVIDER: gemini
+      EMBEDDING_PROVIDER: gemini
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY}
+      SBERT_MODEL: intfloat/multilingual-e5-base
+      # Trino
+      TRINO_HOST: trino
+      TRINO_PORT: 8080
+      TRINO_CATALOG: lakehouse
+      TRINO_DEFAULT_SCHEMA: gold
+      TRINO_USER: chatbot
+      TRINO_PASSWORD: ""
+      # Qdrant
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: 6333
+      # Audit logs (MySQL)
+      LOG_DB_URI: mysql+pymysql://root:admin123@de_mysql:3306/chatlogs
+      # Safety policies
+      SQL_WHITELIST_SCHEMAS: gold,platinum
+      SQL_DEFAULT_LIMIT: "200"
+      SQL_MAX_ROWS: "5000"
+      SQL_TIMEOUT_SECS: "45"
+      TZ: Asia/Ho_Chi_Minh
+    volumes:
+      - ./chat_service:/app
+      - ./docs:/app/docs
+    networks:
+      - de_network
+    depends_on:
+      - qdrant
+      - trino
+      - de_mysql
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
 volumes:
   metabase_data:

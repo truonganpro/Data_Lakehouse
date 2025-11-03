@@ -39,7 +39,7 @@ class MinioIOManager(IOManager):
             "endpoint_url": os.getenv("MINIO_ENDPOINT", "minio:9000"),
             "minio_access_key": os.getenv("MINIO_ACCESS_KEY", "minio"),
             "minio_secret_key": os.getenv("MINIO_SECRET_KEY", "minio123"),
-            "bucket": os.getenv("DATALAKE_BUCKET", "warehouse"),
+            "bucket": os.getenv("DATALAKE_BUCKET", "lakehouse"),
         }
 
     def _get_path(self, context: Union[InputContext, OutputContext]):

@@ -84,3 +84,58 @@ create_bucket:
 	docker exec -it minio \
 		mc alias set local http://127.0.0.1:9000 minio minio123 && \
 		mc mb local/lakehouse || true
+
+# ============================================================
+# FORECASTING COMMANDS
+# ============================================================
+
+.PHONY: forecast-init
+forecast-init:
+	@echo "🔧 Initializing MLflow database..."
+	@bash scripts/init_mlflow.sh
+	@echo ""
+	@echo "🔧 Creating forecast_monitoring table..."
+	@bash scripts/init_forecast_monitoring.sh
+
+.PHONY: forecast-features
+forecast-features:
+	@echo "🔨 Building forecast features..."
+	docker exec etl_pipeline python -m etl_pipeline.ml.feature_build
+	@echo "✅ Features built"
+
+.PHONY: forecast-train
+forecast-train:
+	@echo "🤖 Training forecasting model..."
+	docker exec etl_pipeline python -m etl_pipeline.ml.train_models
+	@echo "✅ Model trained (check MLflow for run_id)"
+
+.PHONY: forecast-predict
+forecast-predict:
+	@echo "🔮 Generating forecasts..."
+	@if [ -z "$(RUN_ID)" ]; then \
+		echo "❌ Error: RUN_ID not provided"; \
+		echo "Usage: make forecast-predict RUN_ID=<mlflow_run_id>"; \
+		exit 1; \
+	fi
+	docker exec etl_pipeline python -m etl_pipeline.ml.batch_predict $(RUN_ID)
+	@echo "✅ Forecasts generated"
+
+.PHONY: forecast-full
+forecast-full:
+	@echo "🚀 Running full forecast pipeline via Dagster..."
+	docker exec etl_pipeline dagster job launch -j forecast_job
+	@echo "✅ Forecast job launched (check Dagster UI at http://localhost:3001)"
+
+.PHONY: forecast-check
+forecast-check:
+	@echo "📊 Checking forecast tables..."
+	docker exec trino trino --execute "SHOW TABLES FROM lakehouse.silver LIKE 'forecast%';"
+	docker exec trino trino --execute "SHOW TABLES FROM lakehouse.platinum LIKE 'demand%';"
+	@echo "✅ Check complete"
+
+.PHONY: forecast-rebuild
+forecast-rebuild:
+	@echo "🔄 Rebuilding etl_pipeline container..."
+	docker compose build etl_pipeline
+	docker compose up -d etl_pipeline
+	@echo "✅ Container rebuilt"

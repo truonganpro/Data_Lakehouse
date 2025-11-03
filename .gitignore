@@ -1,30 +1,13 @@
-# Environment variables
-.env
-.env.local
-.env.*.local
-
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
 *.egg-info/
-.installed.cfg
+dist/
+build/
 *.egg
-MANIFEST
 
 # Virtual environments
 venv/
@@ -42,41 +25,72 @@ myenv/
 *~
 .DS_Store
 
-# Jupyter Notebook
-.ipynb_checkpoints
-*.ipynb_checkpoints/
-
-# Data directories
-mysql/
-postgresql/
-minio/
-dagster_home/storage/
-dagster_home/logs/
-dagster_home/history/
-
-# JAR files (too large for git)
-jars/*.jar
-etl_pipeline/jars/*.jar
-
-# CSV data files
-brazilian-ecommerce/*.csv
-*.csv
+# Environment variables
+.env
+*.env.local
+*.env.*.local
 
 # Logs
 *.log
 logs/
-*.out
+*.log.*
 
-# Docker
-docker-compose.override.yml
-
-# Dagster
-.dagster/
+# Data and storage directories
+mysql/
+postgresql/
+qdrant_data/
+minio/
 dagster_home/storage/
-dagster_home/schedules/
+dagster_home/logs/
 
-# Build artifacts
-*.egg
-*.egg-info/
-dist/
-build/
+# Notebooks
+.ipynb_checkpoints/
+*.ipynb_checkpoints/
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.backup
+*.old
+
+# OS
+Thumbs.db
+.DS_Store
+.Spotlight-V100
+.Trashes
+
+# JAR files (too large for git, download separately)
+jars/*.jar
+
+# Coverage and testing
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+
+# Distribution / packaging
+*.whl
+
+# MLflow
+mlruns/
+mlflow.db
+
+# Docker volumes
+mysql_data/
+postgres_data/
+qdrant_data/
+
+# Large data files
+brazilian-ecommerce/*.csv
+*.csv.gz
+*.parquet
+*.delta
+
+# Backup files
+*.bkp
+
+# Specific project files
+tmp/
+temp/
+test_*.py.bak
