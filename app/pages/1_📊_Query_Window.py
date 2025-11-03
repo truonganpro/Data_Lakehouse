@@ -358,6 +358,17 @@ def first_of_month(d: date):
     """Get first day of month"""
     return d.replace(day=1)
 
+def subtract_months(d: date, months: int):
+    """Subtract months from a date safely"""
+    year = d.year
+    month = d.month - months
+    while month <= 0:
+        month += 12
+        year -= 1
+    # Handle day overflow (e.g., Jan 31 - 1 month = Dec 31, not Dec 30)
+    day = min(d.day, [31, 29 if year % 4 == 0 and (year % 100 != 0 or year % 400 == 0) else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1])
+    return date(year, month, day)
+
 # Calculate default dates based on coverage
 time_grain = st.selectbox("🔍 Time Grain", ["day","week","month","quarter","year"], index=2)
 
@@ -366,10 +377,7 @@ if time_grain == "month":
     # For month: last 6 months
     default_end = COVER_MAX
     # Calculate start as 6 months before
-    if default_end.month <= 6:
-        default_start = default_end.replace(year=default_end.year - 1, month=default_end.month + 6)
-    else:
-        default_start = default_end.replace(month=default_end.month - 6)
+    default_start = subtract_months(default_end, 6)
     default_start = first_of_month(default_start)
 else:
     # For day: last 90 days
