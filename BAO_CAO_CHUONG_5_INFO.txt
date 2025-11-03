@@ -1,0 +1,1310 @@
+# THÔNG TIN BÁO CÁO CHƯƠNG 5 - DATA LAKEHOUSE PROJECT
+# Nghiệp vụ thương mại điện tử & ứng dụng thực tiễn
+
+================================================================================
+📌 5.1. QUY TRÌNH ORDER-TO-CASH TRONG TMĐT (THEO OLIST)
+================================================================================
+
+FILE: load_dataset_into_mysql/01_olist.sql, etl_pipeline/etl_pipeline/assets/gold.py (dòng 165-217)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🔄 QUY TRÌNH TỔNG QUAN
+
+Olist Marketplace E-commerce Process:
+
+1. Customer Browse & Order
+2. Order Approval
+3. Seller Processing
+4. Shipping & Delivery
+5. Payment Processing
+6. Review & Rating
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📦 BƯỚC 1: CUSTOMER BROWSE & ORDER
+
+Entities:
+   • customers: Customer information
+   • products: Product catalog
+   • sellers: Seller information
+
+Process:
+   1. Customer browses products
+   2. Adds items to cart
+   3. Places order
+   4. System generates order_id
+
+Data Captured:
+   • order_purchase_timestamp: When order placed
+   • product_id: What bought
+   • seller_id: Who selling
+   • price: Unit price
+   • freight_value: Shipping cost
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ BƯỚC 2: ORDER APPROVAL
+
+Process:
+   1. Order status: "created"
+   2. Fraud check
+   3. Payment verification
+   4. Status: "approved" → order_approved_at
+   5. Or rejected/canceled
+
+Data Captured:
+   • order_approved_at: Approval timestamp
+   • order_status: created → approved → invoiced
+
+Business Rules:
+   • Must have valid payment
+   • Must pass fraud checks
+   • Must be within seller limits
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🚚 BƯỚC 3: SELLER PROCESSING & SHIPPING
+
+Process:
+   1. Status: "invoiced"
+   2. Seller prepares order
+   3. Ships to carrier
+   4. order_delivered_carrier_date recorded
+   5. Status: "shipped"
+
+Data Captured:
+   • order_delivered_carrier_date: When shipped
+   • shipping_limit_date: SLA deadline
+   • Freight value confirmed
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📬 BƯỚC 4: DELIVERY TO CUSTOMER
+
+Process:
+   1. Carrier transports
+   2. Delivers to customer
+   3. order_delivered_customer_date recorded
+   4. Status: "delivered"
+   5. Or "unavailable" if failed
+
+Data Captured:
+   • order_delivered_customer_date: Actual delivery
+   • order_estimated_delivery_date: Promise date
+   • Delivered on time flag calculated
+
+SLA Calculation:
+   ```sql
+   delivered_on_time = (
+       order_delivered_customer_date <= order_estimated_delivery_date
+   )
+   ```
+
+Target: >90% on-time delivery
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+💳 BƯỚC 5: PAYMENT PROCESSING
+
+Entities:
+   • order_payments: Multiple payments per order
+
+Payment Flow:
+   1. Payment at checkout
+   2. May have multiple payment methods
+   3. payment_sequential tracks order
+   4. Funds held until delivery
+   5. Released to seller
+
+Data Captured:
+   • payment_type: credit_card, boleto, voucher, debit_card
+   • payment_value: Amount
+   • payment_installments: Number of installments
+
+Payment Methods:
+   • credit_card: 75% (most common)
+   • boleto: 20% (Brazilian bill/bank slip)
+   • voucher: 3%
+   • debit_card: 2%
+
+Installment Analysis:
+   • Average: 2-3 installments
+   • Common: 1, 2, 3, 4, 5, 10
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+⭐ BƯỚC 6: REVIEW & RATING
+
+Process:
+   1. After delivery
+   2. Customer prompted to review
+   3. review_creation_date
+   4. Optional title & message
+   5. Seller can respond (review_answer_timestamp)
+
+Data Captured:
+   • review_score: 1-5 stars
+   • review_comment_title: Short feedback
+   • review_comment_message: Detailed feedback
+   • review_answer_timestamp: Seller response time
+
+Review Distribution:
+   • 5 stars: ~57% (most common)
+   • 4 stars: ~19%
+   • 3 stars: ~6%
+   • 2 stars: ~2%
+   • 1 star: ~15% (high complaint rate!)
+
+Average: 4.2/5.0
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📊 ORDER STATUSES
+
+Lifecycle:
+   1. created: Just placed
+   2. approved: Payment confirmed
+   3. invoiced: Invoice generated
+   4. processed: Processing
+   5. shipping: On the way
+   6. delivered: Reached customer ✅
+   7. unavailable: Failed delivery
+   8. canceled: Order cancelled ❌
+
+Status Distribution:
+   • delivered: 95%+
+   • shipped: 2-3%
+   • canceled: <2%
+   • invoiced: <1%
+   • processing: <1%
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+⏱️ TIME METRICS
+
+Order-to-Delivery Cycle:
+   • Total time: Average ~15 days
+   • Range: 5-30 days
+   • Breakdown:
+     - Approval: 0.5 days
+     - Processing: 1 day
+     - Shipping: 12-20 days
+     - Delivery: 1-3 days
+
+Fastest States:
+   • SP (São Paulo): ~10 days
+   • RJ (Rio de Janeiro): ~12 days
+
+Slowest States:
+   • North regions: ~20+ days
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📋 FILES LIÊN QUAN:
+   - load_dataset_into_mysql/01_olist.sql: Schema definition
+   - etl_pipeline/etl_pipeline/assets/gold.py: Process logic
+   - docs/kpi_definitions.md: Delivery SLA
+
+
+================================================================================
+📌 5.2. HỆ THỐNG KPI CỐT LÕI
+================================================================================
+
+FILE: docs/kpi_definitions.md (full), etl_pipeline/etl_pipeline/assets/platinum.py (full)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+💰 REVENUE KPIs
+
+1. GMV (Gross Merchandise Value):
+   Definition: Tổng giá trị giao dịch
+   Formula: SUM(price + freight_value)
+   Target: Maximize
+   Datamart: dm_sales_monthly_category.gmv
+
+2. AOV (Average Order Value):
+   Definition: Giá trị đơn hàng trung bình
+   Formula: GMV / COUNT(DISTINCT order_id)
+   Target: > 150 BRL
+   Datamart: dm_sales_monthly_category.aov
+
+3. Total Revenue:
+   Definition: Doanh thu (delivered only)
+   Formula: SUM(price) WHERE status='delivered'
+   Target: Maximize
+   Datamart: dm_sales_monthly_category (filtered)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📊 OPERATIONAL KPIs
+
+4. On-Time Delivery Rate (SLA):
+   Definition: % đơn hàng giao đúng hạn
+   Formula: SUM(delivered_on_time) / COUNT(*)
+   Target: >90%
+   Datamart: dm_logistics_sla.on_time_rate
+   Calculation:
+   ```python
+   delivered_on_time = (
+       order_delivered_customer_date <= order_estimated_delivery_date
+   )
+   ```
+
+5. Cancel Rate:
+   Definition: % đơn hàng bị hủy
+   Formula: COUNT(status='canceled') / COUNT(*)
+   Target: <2%
+   Datamart: dm_seller_kpi.cancel_rate
+   Business Impact: Revenue loss indicator
+
+6. Average Delivery Days:
+   Definition: Số ngày trung bình từ đặt → giao
+   Formula: AVG(delivered_days)
+   Target: <15 days
+   Datamart: dm_logistics_sla.avg_delivered_days
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+⭐ QUALITY KPIs
+
+7. Review Score:
+   Definition: Điểm đánh giá khách hàng
+   Formula: AVG(review_score)
+   Target: >4.0/5.0
+   Datamart: dm_seller_kpi.avg_review_score
+   Distribution:
+   • 5 stars: 57%
+   • 4 stars: 19%
+   • 1-3 stars: 24%
+
+8. Review Rate:
+   Definition: % đơn hàng có review
+   Formula: COUNT(review_id) / COUNT(order_id)
+   Target: Track quality
+   Datamart: dm_seller_kpi
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+👥 CUSTOMER KPIs
+
+9. Customer Retention:
+   Definition: % khách mua lại
+   Formula: COUNT(DISTINCT customers with >1 order) / COUNT(DISTINCT customer_id)
+   Target: >15%
+   Datamart: dm_customer_lifecycle (cohort)
+   Analysis:
+   • Cohort month tracking
+   • Repeat purchase patterns
+   • Churn identification
+
+10. New vs Returning Customers:
+   Definition: Phân loại khách mới/cũ
+   Formula: First purchase date
+   Analysis: Cohort-based retention
+   Datamart: dm_customer_lifecycle
+
+11. Lifetime Value (LTV):
+   Definition: Tổng giá trị khách mang lại
+   Formula: SUM(gmv) per customer
+   Datamart: dm_customer_lifecycle.gmv
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+💳 PAYMENT KPIs
+
+12. Payment Mix:
+   Definition: Phân bố phương thức thanh toán
+   Breakdown:
+   • credit_card: 75%
+   • boleto: 20%
+   • voucher: 3%
+   • debit_card: 2%
+   Datamart: dm_payment_mix
+   Business Value:
+   • Cash flow planning
+   • Fee optimization
+   • Regional preferences
+
+13. Installment Analysis:
+   Definition: Phân tích trả góp
+   Formula: AVG(payment_installments)
+   Average: 2-3 installments
+   Datamart: dm_payment_mix (implied)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📦 PRODUCT KPIs
+
+14. Top Products:
+   Definition: Sản phẩm bán chạy
+   Formula: SUM(revenue) GROUP BY product
+   Datamart: dm_product_bestsellers
+   Dimensions:
+   • Revenue
+   • Units sold
+   • Review correlation
+
+15. Category Performance:
+   Definition: Hiệu suất danh mục
+   Formula: SUM(gmv) GROUP BY category
+   Datamart: dm_sales_monthly_category
+   Dimensions:
+   • GMV, Orders, Units, AOV
+   • Month-over-month growth
+
+16. Price Bands:
+   Definition: Phân khúc giá
+   Formula: GROUP BY category, price_range
+   Datamart: dm_category_price_bands
+   Analysis: Most sales in mid-range ($50-$200)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🌍 REGIONAL KPIs
+
+17. Sales by State:
+   Definition: Doanh số theo bang
+   Top States:
+   • SP: 40% (São Paulo)
+   • RJ: 15% (Rio de Janeiro)
+   • MG: 12% (Minas Gerais)
+   Datamart: dm_sales_monthly_category + geolocation
+
+18. Regional Distribution:
+   Definition: Phân bố theo vùng
+   Southeast: 70%
+   South: 15%
+   Northeast: 10%
+   Other: 5%
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🔮 FORECASTING KPIs
+
+19. Forecast Accuracy (sMAPE):
+   Definition: Độ chính xác dự báo
+   Target: <20% (Good)
+   Metric: Symmetric Mean Absolute Percentage Error
+   Datamart: platinum.forecast_monitoring
+
+20. Demand Forecast:
+   Definition: Dự báo nhu cầu 28 ngày
+   Horizon: 28 days
+   Confidence: Intervals (yhat_lo, yhat_hi)
+   Datamart: platinum.demand_forecast
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📊 KPI DASHBOARD MAPPING
+
+Executive Dashboard:
+   • Total GMV
+   • Total Orders
+   • AOV
+   • Revenue Trend
+
+Operational Dashboard:
+   • On-time rate
+   • Cancel rate
+   • Delivery days
+   • Review scores
+
+Customer Dashboard:
+   • Retention rate
+   • Cohort analysis
+   • LTV
+
+Financial Dashboard:
+   • Payment mix
+   • Installments
+   • Cash flow
+
+Product Dashboard:
+   • Top products
+   • Category performance
+   • Price bands
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📋 FILES LIÊN QUAN:
+   - docs/kpi_definitions.md: Full KPI definitions
+   - etl_pipeline/etl_pipeline/assets/platinum.py: KPI calculations
+   - README.md (dòng 200-285): Datamart stats
+
+
+================================================================================
+📌 5.3. CÂU HỎI QUẢN TRỊ THƯỜNG GẶP & CÁCH KHAI THÁC
+================================================================================
+
+FILE: PROJECT_OVERVIEW.md (dòng 501-595), metabase_queries.sql, chat_service/
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+❓ CÂU HỎI EXECUTIVE
+
+Q1: "Doanh thu tháng này vs tháng trước?"
+Answer: Revenue comparison MoM
+Query: dm_sales_monthly_category
+Method: Chat / Metabase / Query Window
+SQL:
+```sql
+SELECT 
+    year_month,
+    SUM(gmv) AS total_revenue,
+    LAG(SUM(gmv)) OVER (ORDER BY year_month) AS prev_month,
+    (SUM(gmv) - LAG(SUM(gmv)) OVER (ORDER BY year_month)) * 100.0 / 
+        LAG(SUM(gmv)) OVER (ORDER BY year_month) AS growth_pct
+FROM lakehouse.platinum.dmsalesmonthlycategory
+GROUP BY year_month
+ORDER BY year_month DESC
+LIMIT 12
+```
+
+Q2: "Top 5 danh mục sản phẩm tăng trưởng mạnh?"
+Answer: Category ranking by GMV
+Query: dm_sales_monthly_category
+Method: Chat / Query Window
+SQL:
+```sql
+SELECT 
+    product_category_name_english,
+    SUM(gmv) AS revenue,
+    SUM(orders) AS orders,
+    ROUND(SUM(gmv) / SUM(orders), 2) AS aov
+FROM lakehouse.platinum.dmsalesmonthlycategory
+WHERE year_month = '2018-06'
+GROUP BY product_category_name_english
+ORDER BY revenue DESC
+LIMIT 5
+```
+
+Q3: "Tỷ lệ giao hàng đúng hạn hiện tại?"
+Answer: On-time SLA metric
+Query: dm_logistics_sla
+Method: Chat / Metabase
+SQL:
+```sql
+SELECT 
+    AVG(on_time_rate) * 100.0 AS avg_on_time_pct,
+    MIN(on_time_rate) * 100.0 AS min_rate,
+    MAX(on_time_rate) * 100.0 AS max_rate
+FROM lakehouse.platinum.dmlogisticssla
+```
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+❓ CÂU HỎI SALES
+
+Q4: "AOV theo từng bang/state?"
+Answer: Average order value by state
+Query: fact_order + dim_customer
+Method: Chat / Query Window
+SQL:
+```sql
+SELECT 
+    dc.customer_state,
+    COUNT(DISTINCT fo.order_id) AS orders,
+    SUM(fo.sum_price) AS revenue,
+    ROUND(SUM(fo.sum_price) / COUNT(DISTINCT fo.order_id), 2) AS aov
+FROM lakehouse.gold.factorder fo
+JOIN lakehouse.gold.dimcustomer dc ON fo.customer_id = dc.customer_id
+WHERE fo.full_date >= DATE '2018-01-01'
+GROUP BY dc.customer_state
+ORDER BY aov DESC
+```
+
+Q5: "Top 10 sản phẩm bán chạy Q3 2018?"
+Answer: Product ranking
+Query: dm_product_bestsellers
+Method: Chat / Query Window
+SQL:
+```sql
+SELECT 
+    product_id,
+    product_category_name_english,
+    total_gmv,
+    total_orders,
+    avg_review_score
+FROM lakehouse.platinum.dmproductbestsellers
+WHERE year_month BETWEEN '2018-07' AND '2018-09'
+ORDER BY total_gmv DESC
+LIMIT 10
+```
+
+Q6: "Xu hướng doanh thu 6 tháng qua?"
+Answer: Revenue time series
+Query: dm_sales_monthly_category
+Method: Chat / Metabase dashboard
+SQL:
+```sql
+SELECT 
+    year_month,
+    SUM(gmv) AS revenue,
+    SUM(orders) AS orders,
+    ROUND(SUM(gmv) / SUM(orders), 2) AS aov
+FROM lakehouse.platinum.dmsalesmonthlycategory
+WHERE year_month >= '2018-01'
+GROUP BY year_month
+ORDER BY year_month
+```
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+❓ CÂU HỎI CUSTOMER
+
+Q7: "Customer retention rate theo cohort?"
+Answer: Cohort retention analysis
+Query: dm_customer_lifecycle
+Method: Chat / Query Window / Metabase
+SQL:
+```sql
+WITH cohort_base AS (
+    SELECT 
+        cohort_month,
+        COUNT(DISTINCT customer_unique_id) AS new_customers
+    FROM lakehouse.platinum.dmcustomerlifecycle
+    GROUP BY cohort_month
+),
+retention AS (
+    SELECT 
+        cohort_month,
+        year_month,
+        COUNT(DISTINCT customer_unique_id) AS active_customers
+    FROM lakehouse.platinum.dmcustomerlifecycle
+    GROUP BY cohort_month, year_month
+)
+SELECT 
+    r.cohort_month,
+    r.year_month,
+    c.new_customers,
+    r.active_customers,
+    ROUND(r.active_customers * 100.0 / c.new_customers, 2) AS retention_pct
+FROM retention r
+JOIN cohort_base c ON r.cohort_month = c.cohort_month
+ORDER BY r.cohort_month, r.year_month
+```
+
+Q8: "Phân bố khách hàng theo vùng?"
+Answer: Geographic distribution
+Query: dm_customer_lifecycle + dim_customer
+Method: Chat / Metabase
+SQL:
+```sql
+SELECT 
+    dc.customer_state,
+    COUNT(DISTINCT dcl.customer_unique_id) AS customers,
+    SUM(dcl.orders) AS total_orders,
+    SUM(dcl.gmv) AS total_gmv
+FROM lakehouse.platinum.dmcustomerlifecycle dcl
+JOIN lakehouse.gold.dimcustomer dc ON dcl.customer_id = dc.customer_id
+GROUP BY dc.customer_state
+ORDER BY customers DESC
+LIMIT 10
+```
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+❓ CÂU HỎI OPERATIONS
+
+Q9: "Seller có hiệu suất kém nhất?"
+Answer: Underperforming sellers
+Query: dm_seller_kpi
+Method: Chat / Query Window
+SQL:
+```sql
+SELECT 
+    seller_id,
+    seller_state,
+    gmv,
+    on_time_rate * 100.0 AS on_time_pct,
+    cancel_rate * 100.0 AS cancel_pct,
+    avg_review_score
+FROM lakehouse.platinum.dmsellerkpi
+WHERE 
+    on_time_rate < 0.85 OR
+    cancel_rate > 0.05 OR
+    avg_review_score < 3.5
+ORDER BY on_time_rate ASC, cancel_rate DESC
+LIMIT 20
+```
+
+Q10: "Thời gian giao hàng trung bình theo vùng?"
+Answer: Delivery performance by region
+Query: dm_logistics_sla
+Method: Chat / Query Window
+SQL:
+```sql
+SELECT 
+    region_id,
+    COUNT(*) AS order_count,
+    ROUND(AVG(avg_delivered_days), 2) AS avg_days,
+    ROUND(AVG(on_time_rate) * 100.0, 2) AS on_time_pct
+FROM lakehouse.platinum.dmlogisticssla
+GROUP BY region_id
+ORDER BY avg_days DESC
+```
+
+Q11: "Phương thức thanh toán nào phổ biến?"
+Answer: Payment method mix
+Query: dm_payment_mix
+Method: Chat / Query Window
+SQL:
+```sql
+SELECT 
+    payment_type,
+    SUM(orders) AS total_orders,
+    ROUND(SUM(orders) * 100.0 / SUM(SUM(orders)) OVER(), 2) AS pct_orders,
+    SUM(payment_total) AS total_value
+FROM lakehouse.platinum.dmpaymentmix
+GROUP BY payment_type
+ORDER BY total_orders DESC
+```
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+❓ CÂU HỎI FORECASTING
+
+Q12: "Dự báo nhu cầu tháng tới?"
+Answer: 28-day demand forecast
+Query: platinum.demand_forecast
+Method: Query Window / Chat
+SQL:
+```sql
+SELECT 
+    product_category_name_english,
+    forecast_date,
+    yhat AS forecasted_demand,
+    yhat_lo AS lower_bound,
+    yhat_hi AS upper_bound,
+    confidence
+FROM lakehouse.platinum.demand_forecast
+WHERE forecast_date >= DATE '2018-11-01'
+  AND forecast_date < DATE '2018-12-01'
+ORDER BY forecast_date, product_category_name_english
+```
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🎯 ANSWERING METHODS
+
+Method 1: Chat Interface
+   URL: http://localhost:8501/💬_Chat
+   Capability: Natural language
+   Example: "Doanh thu tháng này?"
+   Output: Summary + SQL + Data
+
+Method 2: Query Window
+   URL: http://localhost:8501/📊_Query_Window
+   Capability: OLAP builder
+   Output: Pivot table + CSV/Excel
+
+Method 3: Metabase Dashboard
+   URL: http://localhost:3000
+   Capability: Visual analytics
+   Output: Charts + Filters
+
+Method 4: Direct SQL
+   URL: Trino CLI
+   Capability: Full SQL
+   Output: Raw results
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📋 FILES LIÊN QUAN:
+   - metabase_queries.sql: Sample queries
+   - chat_service/: NL to SQL logic
+   - PROJECT_OVERVIEW.md: Use cases
+
+
+================================================================================
+📌 5.4. BẢN ĐỒ DỮ LIỆU: TỪ OLIST → DATAMARTS / DASHBOARD
+================================================================================
+
+FILE: BAO_CAO_CHUONG_4_INFO.txt, PROJECT_OVERVIEW.md (dòng 51-73, 334-375)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🗺️ DATA FLOW MAP
+
+MySQL Source (9 tables)
+    ↓
+┌─────────────────────────────────────────────────┐
+│  BRONZE LAYER                                   │
+│  Raw data ingestion (no transformation)         │
+│  • customer, seller, product                    │
+│  • order, order_item, payment                   │
+│  • review, geolocation, category_translation    │
+└──────────────────┬──────────────────────────────┘
+                   ↓
+┌─────────────────────────────────────────────────┐
+│  SILVER LAYER                                   │
+│  Cleaning & normalization                       │
+│  • dropDuplicates, na.drop                      │
+│  • Type casting, validation                     │
+│  • Computed fields (city_state)                 │
+└──────────────────┬──────────────────────────────┘
+                   ↓
+┌─────────────────────────────────────────────────┐
+│  GOLD LAYER                                     │
+│  Star Schema (Facts + Dimensions)               │
+│  Facts: order_item, order, payment, review      │
+│  Dims: customer, seller, product, category      │
+│       date, geolocation                         │
+└──────────────────┬──────────────────────────────┘
+                   ↓
+┌─────────────────────────────────────────────────┐
+│  PLATINUM LAYER                                 │
+│  Business Datamarts                             │
+│  • dm_sales_monthly_category                    │
+│  • dm_seller_kpi                                │
+│  • dm_customer_lifecycle                        │
+│  • dm_payment_mix                               │
+│  • dm_logistics_sla                             │
+│  • dm_product_bestsellers                       │
+│  • dm_category_price_bands                      │
+│  • demand_forecast (ML)                         │
+└──────────────────┬──────────────────────────────┘
+                   ↓
+┌─────────────────────────────────────────────────┐
+│  DASHBOARDS & REPORTS                           │
+│  • Metabase dashboards                          │
+│  • Query Window exports                         │
+│  • Chat responses                               │
+└─────────────────────────────────────────────────┘
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📊 DETAILED MAPPING
+
+BRONZE → SILVER:
+   customers → silver_customer (cleaning)
+   sellers → silver_seller (dedupe)
+   products → silver_product (casting, NULLs)
+   orders → silver_order (validation)
+   order_items → silver_order_item (normalize)
+   payments → silver_payment (aggregate)
+   reviews → silver_review (filter)
+   geolocation → silver_geolocation (bounds)
+   category_translation → silver_category_translation
+
+SILVER → GOLD:
+   
+   Dimensions:
+   silver_customer → gold.dim_customer
+      columns: customer_id, city_state, computed
+   
+   silver_seller → gold.dim_seller
+      columns: seller_id, city_state
+   
+   silver_product → gold.dim_product
+      columns: product_id, category
+   
+   silver_category_translation → gold.dim_product_category
+      columns: category_name, english_name
+   
+   silver_geolocation → gold.dim_geolocation
+      columns: zip_code, lat/lng, city/state
+   
+   Generated: gold.dim_date
+      columns: full_date, year_month, week, etc.
+   
+   Facts:
+   silver_order_item → gold.fact_order_item
+      grain: 1 row per order_item
+      measures: price, freight_value
+      dims: product, seller, date
+   
+   silver_order + silver_payment → gold.fact_order
+      grain: 1 row per order
+      measures: items_count, sum_price, delivery metrics
+      dims: customer, date
+   
+   silver_payment → gold.fact_payment
+      grain: 1 row per payment
+      measures: payment_value, installments
+      dims: order, date
+   
+   silver_review → gold.fact_review
+      grain: 1 row per review
+      measures: review_score
+      dims: order, date
+
+GOLD → PLATINUM:
+
+   1. DM_SALES_MONTHLY_CATEGORY:
+   Sources: fact_order_item, dim_product, dim_category, dim_date
+   Aggregation: GROUP BY year_month, category
+   Measures: gmv, orders, units, aov
+   Output: 1,326 rows
+   Use: Revenue analysis, category performance
+
+   2. DM_SELLER_KPI:
+   Sources: fact_order_item, fact_order, fact_review, dim_seller
+   Aggregation: GROUP BY seller_id
+   Measures: gmv, orders, on_time_rate, cancel_rate, avg_review_score
+   Output: 3,095 rows
+   Use: Seller ranking, quality control
+
+   3. DM_CUSTOMER_LIFECYCLE:
+   Sources: fact_order_item, dim_customer, dim_date
+   Aggregation: GROUP BY customer_id, year_month
+   Measures: orders, gmv, cohort_month
+   Output: 96,462 rows
+   Use: Retention analysis, cohort tracking
+
+   4. DM_PAYMENT_MIX:
+   Sources: fact_payment, fact_order, dim_date
+   Aggregation: GROUP BY year_month, payment_type
+   Measures: orders, unique_customers, payment_total
+   Output: 90 rows
+   Use: Payment distribution, cash flow
+
+   5. DM_LOGISTICS_SLA:
+   Sources: fact_order, dim_customer, dim_geolocation, dim_date
+   Aggregation: GROUP BY region
+   Measures: on_time_rate, avg_delivered_days
+   Output: 574 rows
+   Use: Delivery performance, SLA monitoring
+
+   6. DM_PRODUCT_BESTSELLERS:
+   Sources: fact_order_item, fact_review, dim_product, dim_category
+   Aggregation: GROUP BY product, category
+   Measures: total_gmv, total_orders, avg_review_score
+   Output: 32,951 rows
+   Use: Product ranking, inventory planning
+
+   7. DM_CATEGORY_PRICE_BANDS:
+   Sources: fact_order_item, dim_product, dim_category
+   Aggregation: GROUP BY category, price_range
+   Measures: bands, distribution
+   Output: 326 rows
+   Use: Pricing analysis, segmentation
+
+   8. DEMAND_FORECAST (ML):
+   Sources: ML pipeline (historical + features)
+   Output: Forecasts × 28 days × products × regions
+   Use: Inventory planning, procurement
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📈 DASHBOARD MAPPING
+
+Executive Dashboard:
+   Tables: dm_sales_monthly_category
+   Metrics: Total GMV, Orders, AOV, Trend
+   Filters: Date range, Category
+
+Sales Deep Dive:
+   Tables: dm_sales_monthly_category, dm_category_price_bands
+   Metrics: GMV by category, Price distribution
+   Filters: Category, Region
+
+Customer Analytics:
+   Tables: dm_customer_lifecycle
+   Metrics: Retention, Cohort, LTV
+   Filters: Cohort month, State
+
+Operations:
+   Tables: dm_logistics_sla, dm_seller_kpi
+   Metrics: On-time rate, Delivery days, Reviews
+   Filters: Region, Seller
+
+Payment Analysis:
+   Tables: dm_payment_mix
+   Metrics: Payment distribution, Installments
+   Filters: Date range
+
+Product Intelligence:
+   Tables: dm_product_bestsellers
+   Metrics: Top products, Reviews
+   Filters: Category, Date
+
+Forecasting:
+   Tables: demand_forecast, forecast_monitoring
+   Metrics: Forecast accuracy, Demand trends
+   Filters: Product, Region
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📋 FILES LIÊN QUAN:
+   - BAO_CAO_CHUONG_4_INFO.txt: Detailed ETL flow
+   - PROJECT_OVERVIEW.md: Architecture diagram
+   - etl_pipeline/etl_pipeline/assets/*.py: Implementation
+
+
+================================================================================
+📌 5.5. ĐỊNH NGHĨA & CÔNG THỨC KPI (CHUẨN HÓA TRONG PHỤ LỤC)
+================================================================================
+
+FILE: docs/kpi_definitions.md (full document)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+💰 REVENUE KPIs
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+KPI 1.1: GMV (Gross Merchandise Value)
+   Định nghĩa: Tổng giá trị giao dịch (chưa trừ phí)
+   Công thức:
+   ```sql
+   GMV = SUM(price + freight_value)
+   WHERE order_status IN ('delivered', 'shipped', 'invoiced')
+   ```
+   Đơn vị: BRL
+   Target: Maximize
+   Datamart: dm_sales_monthly_category.gmv
+   Dimensions: Tháng, Danh mục, Vùng miền
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+KPI 1.2: AOV (Average Order Value)
+   Định nghĩa: Giá trị đơn hàng trung bình
+   Công thức:
+   ```sql
+   AOV = SUM(total_price) / COUNT(DISTINCT order_id)
+   WHERE order_status = 'delivered'
+   ```
+   Đơn vị: BRL
+   Target: > 150 BRL
+   Interpretation: Giá trị trung bình mỗi đơn
+   Datamart: dm_sales_monthly_category.aov
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+KPI 1.3: Net Revenue
+   Định nghĩa: Doanh thu sau khi trừ hủy/hoàn trả
+   Công thức:
+   ```sql
+   Net Revenue = SUM(CASE 
+       WHEN order_status = 'delivered' THEN total_price 
+       ELSE 0 
+   END)
+   ```
+   Đơn vị: BRL
+   Target: Maximize
+   Note: Không tính canceled orders
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+👥 CUSTOMER KPIs
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+KPI 2.1: Active Customers
+   Định nghĩa: Số khách hàng có đơn trong kỳ
+   Công thức:
+   ```sql
+   Active Customers = COUNT(DISTINCT customer_id)
+   WHERE order_purchase_timestamp >= start_date
+     AND order_purchase_timestamp < end_date
+   ```
+   Đơn vị: Count
+   Target: Track growth
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+KPI 2.2: Customer Retention Rate
+   Định nghĩa: % khách mua lại
+   Công thức:
+   ```sql
+   Retention Rate = COUNT(DISTINCT CASE WHEN order_count > 1 THEN customer_id END) * 100.0 / 
+                    COUNT(DISTINCT customer_id)
+   ```
+   Đơn vị: %
+   Target: > 15%
+   Interpretation: Cao = khách trung thành
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+KPI 2.3: Lifetime Value (LTV)
+   Định nghĩa: Tổng giá trị khách mang lại
+   Công thức:
+   ```sql
+   LTV = SUM(gmv) 
+   WHERE customer_id = X
+   GROUP BY customer_id
+   ```
+   Đơn vị: BRL
+   Target: Track segmentation
+   Use: Identify high-value customers
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📊 OPERATIONAL KPIs
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+KPI 3.1: On-Time Delivery Rate (SLA)
+   Định nghĩa: % đơn giao đúng hạn
+   Công thức:
+   ```sql
+   On-Time Rate = SUM(delivered_on_time) * 100.0 / COUNT(*)
+   WHERE order_status = 'delivered'
+   
+   delivered_on_time = (
+       order_delivered_customer_date <= order_estimated_delivery_date
+   ) ? 1 : 0
+   ```
+   Đơn vị: %
+   Target: > 90%
+   Datamart: dm_logistics_sla.on_time_rate
+   Business Impact: Customer satisfaction
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+KPI 3.2: Cancel Rate
+   Định nghĩa: % đơn bị hủy
+   Công thức:
+   ```sql
+   Cancel Rate = COUNT(CASE WHEN order_status = 'canceled' THEN 1 END) * 100.0 / 
+                 COUNT(*)
+   ```
+   Đơn vị: %
+   Target: < 2%
+   Datamart: dm_seller_kpi.cancel_rate
+   Business Impact: Revenue loss
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+KPI 3.3: Average Delivery Days
+   Định nghĩa: Số ngày trung bình từ đặt → giao
+   Công thức:
+   ```sql
+   Avg Delivery Days = AVG(
+       date_diff('day', 
+           order_purchase_timestamp, 
+           order_delivered_customer_date)
+   )
+   WHERE order_status = 'delivered'
+   ```
+   Đơn vị: Days
+   Target: < 15 days
+   Datamart: dm_logistics_sla.avg_delivered_days
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+⭐ QUALITY KPIs
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+KPI 4.1: Review Score
+   Định nghĩa: Điểm đánh giá trung bình
+   Công thức:
+   ```sql
+   Avg Review Score = AVG(review_score)
+   WHERE review_score IS NOT NULL
+   ```
+   Đơn vị: Stars (1-5)
+   Target: > 4.0/5.0
+   Datamart: dm_seller_kpi.avg_review_score
+   Distribution:
+   • 5 stars: 57%
+   • 4 stars: 19%
+   • 1-3 stars: 24%
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+KPI 4.2: Review Rate
+   Định nghĩa: % đơn có review
+   Công thức:
+   ```sql
+   Review Rate = COUNT(DISTINCT review_id) * 100.0 / 
+                 COUNT(DISTINCT order_id)
+   ```
+   Đơn vị: %
+   Target: Track quality engagement
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+💳 PAYMENT KPIs
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+KPI 5.1: Payment Mix
+   Định nghĩa: Phân bố phương thức thanh toán
+   Phương thức:
+   • credit_card: ~75%
+   • boleto: ~20%
+   • voucher: ~3%
+   • debit_card: ~2%
+   Công thức:
+   ```sql
+   Payment Share = COUNT(DISTINCT order_id) * 100.0 / 
+                   SUM(COUNT(DISTINCT order_id)) OVER()
+   GROUP BY payment_type
+   ```
+   Đơn vị: %
+   Datamart: dm_payment_mix
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+KPI 5.2: Average Installments
+   Định nghĩa: Số kỳ trả góp trung bình
+   Công thức:
+   ```sql
+   Avg Installments = AVG(payment_installments)
+   WHERE payment_type = 'credit_card'
+   ```
+   Đơn vị: Kỳ
+   Average: 2-3 kỳ
+   Use: Cash flow planning
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📈 GROWTH KPIs
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+KPI 6.1: Month-over-Month Growth
+   Định nghĩa: Tăng trưởng so với tháng trước
+   Công thức:
+   ```sql
+   MoM Growth = (current_month - prev_month) * 100.0 / prev_month
+   
+   prev_month = LAG(revenue) OVER (ORDER BY year_month)
+   ```
+   Đơn vị: %
+   Target: > 0%
+   Use: Track trends
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+KPI 6.2: Year-over-Year Growth
+   Định nghĩa: Tăng trưởng so với cùng kỳ năm trước
+   Công thức:
+   ```sql
+   YoY Growth = (current_year - prev_year) * 100.0 / prev_year
+   
+   prev_year = LAG(revenue, 12) OVER (ORDER BY year_month)
+   ```
+   Đơn vị: %
+   Target: > 0%
+   Use: Seasonal comparison
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🔮 FORECASTING KPIs
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+KPI 7.1: Forecast Accuracy (sMAPE)
+   Định nghĩa: Độ chính xác dự báo
+   Công thức:
+   ```
+   sMAPE = (100% / n) * Σ(
+       |actual - forecast| / (|actual| + |forecast|) / 2
+   )
+   ```
+   Đơn vị: %
+   Target: < 20% (Good)
+   Interpretation: Thấp = chính xác
+   Datamart: forecast_monitoring
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+KPI 7.2: Demand Forecast
+   Định nghĩa: Dự báo nhu cầu 28 ngày
+   Horizon: 28 days
+   Confidence Intervals:
+   • yhat: Point forecast
+   • yhat_lo: Lower bound (90%)
+   • yhat_hi: Upper bound (90%)
+   Model: LightGBM gradient boosting
+   Datamart: demand_forecast
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📋 KPI SUMMARY TABLE
+
+| KPI | Formula | Target | Unit | Datamart |
+|-----|---------|--------|------|----------|
+| GMV | SUM(price + freight) | Maximize | BRL | dm_sales_monthly_category |
+| AOV | GMV / Orders | >150 | BRL | dm_sales_monthly_category |
+| Retention | Repeats / Total | >15% | % | dm_customer_lifecycle |
+| On-Time | On-time / Delivered | >90% | % | dm_logistics_sla |
+| Cancel | Canceled / Total | <2% | % | dm_seller_kpi |
+| Review | AVG(score) | >4.0 | Stars | dm_seller_kpi |
+| Delivery | AVG(days) | <15 | Days | dm_logistics_sla |
+| sMAPE | Forecast error | <20% | % | forecast_monitoring |
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📋 FILES LIÊN QUAN:
+   - docs/kpi_definitions.md: Full definitions
+   - README.md: Recommended dashboards
+
+
+================================================================================
+📌 5.6. TIỂU KẾT CHƯƠNG
+================================================================================
+
+📝 ĐIỂM CHÍNH CẦN TÓM TẮT:
+
+✅ ORDER-TO-CASH PROCESS:
+   • 6 bước: Order → Approve → Process → Ship → Pay → Review
+   • 9 bảng Olist nguồn
+   • 8 trạng thái order lifecycle
+   • SLA: >90% on-time, <15 days avg
+
+✅ KPI SYSTEM:
+   • 20 KPIs cốt lõi
+   • 7 datamarts pre-aggregated
+   • Real-time tracking
+   • Actionable insights
+
+✅ QUESTION ANSWERING:
+   • 12 câu hỏi thường gặp
+   • 4 methods: Chat / Query Window / Metabase / SQL
+   • Natural language support
+   • Self-service analytics
+
+✅ DATA MAPPING:
+   • Bronze → Silver → Gold → Platinum
+   • 36 assets total
+   • Automated ETL 8-10 min
+   • Business-ready datamarts
+
+✅ KPI STANDARDIZATION:
+   • Formulas documented
+   • Targets defined
+   • Datamarts linked
+   • Dashboard templates
+
+🎯 THÀNH QUẢ:
+   E-commerce analytics platform với:
+   • Complete Order-to-Cash visibility
+   • 20 standardized KPIs
+   • Self-service question answering
+   • 134K+ pre-aggregated rows
+
+📊 GIÁ TRỊ:
+   Business users có thể:
+   • Track revenue trends
+   • Monitor operational KPIs
+   • Analyze customer behavior
+   • Optimize logistics
+   • Forecast demand
+
+================================================================================
+📁 DANH SÁCH FILE CẦN ĐỌC ĐỂ VIẾT BÁO CÁO
+================================================================================
+
+MUST READ:
+   1. docs/kpi_definitions.md (full)
+   2. load_dataset_into_mysql/01_olist.sql: Schema
+   3. etl_pipeline/etl_pipeline/assets/gold.py: Process
+   4. etl_pipeline/etl_pipeline/assets/platinum.py: Datamarts
+   5. metabase_queries.sql: Sample queries
+   6. PROJECT_OVERVIEW.md: Use cases
+
+NICE TO HAVE:
+   7. chat_service/: NL to SQL
+   8. app/pages/1_📊_Query_Window.py: OLAP
+   9. docs/data_dictionary.md: Schema details
+
+================================================================================
+EOF
+
+
