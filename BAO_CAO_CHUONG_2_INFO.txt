@@ -1,0 +1,592 @@
+# THÔNG TIN BÁO CÁO CHƯƠNG 2 - DATA LAKEHOUSE PROJECT
+# Tổng hợp các file liên quan và nội dung cho báo cáo
+
+================================================================================
+📌 2.1. MÔ TẢ TẬP DỮ LIỆU VÀ NGUỒN GỐC
+================================================================================
+
+DATASET: Brazilian E-commerce Public Dataset by Olist
+
+📂 NGUỒN DỮ LIỆU:
+   - Kaggle: https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce
+   - Nhà cung cấp: Olist (Brazilian marketplace)
+   - Loại: Thương mại điện tử B2C
+
+📊 ĐẶC ĐIỂM DATASET:
+   - Thời gian: 2016-09-04 → 2018-10-17 (khoảng 2 năm)
+   - Kích thước: ~100,000 đơn hàng (orders)
+   - 32,000 sản phẩm (products)
+   - 9,000 người bán (sellers)
+   - 96,000 khách hàng (customers)
+   - 110,000 mục đơn hàng (order_items)
+   - Tổng dung lượng: ~40MB (CSV files)
+
+📁 CẤU TRÚC DATASET (9 CSV files):
+   📄 brazilian-ecommerce/
+   ├── olist_customers_dataset.csv          (customers)
+   ├── olist_geolocation_dataset.csv        (geolocation)
+   ├── olist_order_items_dataset.csv        (order_items)
+   ├── olist_order_payments_dataset.csv     (order_payments)
+   ├── olist_order_reviews_dataset.csv      (order_reviews)
+   ├── olist_orders_dataset.csv             (orders)
+   ├── olist_products_dataset.csv           (products)
+   ├── olist_sellers_dataset.csv            (sellers)
+   └── product_category_name_translation.csv (product_category_name_translation)
+
+📊 MIỀN DỮ LIỆU BAO GỒM:
+   1. Khách hàng (Customers): ID, thông tin địa lý (zip, city, state)
+   2. Đơn hàng (Orders): ID, trạng thái, thời gian (purchase, delivery)
+   3. Mục đơn hàng (Order Items): chi tiết SP, giá, phí ship, seller
+   4. Sản phẩm (Products): danh mục, thông tin kỹ thuật (weight, dimensions)
+   5. Người bán (Sellers): ID, địa lý
+   6. Thanh toán (Payments): type, installments, giá trị
+   7. Đánh giá (Reviews): điểm, bình luận, timestamp
+   8. Địa lý (Geolocation): tọa độ, zip, city, state
+   9. Danh mục (Product Category): mapping PT→EN
+
+🎯 MỤC ĐÍCH SỬ DỤNG:
+   - Phân tích xu hướng bán hàng (sales trends)
+   - Đánh giá hiệu suất logistics & delivery
+   - Phân tích hành vi khách hàng
+   - Dự báo nhu cầu (demand forecasting)
+   - Tối ưu hóa inventory
+
+📋 FILES LIÊN QUAN:
+   - README.md (dòng 164-195): Dataset overview
+   - load_dataset_into_mysql/01_olist.sql: Schema definition
+   - brazilian-ecommerce/*.csv: Raw data files
+
+
+================================================================================
+📌 2.2. TỪ ĐIỂN DỮ LIỆU (SCHEMA, KHÓA, KIỂU DỮ LIỆU)
+================================================================================
+
+📊 SCHEMA GỐC (MySQL - Bronze Layer):
+   File: load_dataset_into_mysql/01_olist.sql
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. CUSTOMERS
+   Primary Key: customer_id (VARCHAR(50))
+   Attributes:
+      - customer_unique_id VARCHAR(50)     # Unique customer identifier
+      - customer_zip_code_prefix INT       # Brazilian zip code prefix
+      - customer_city VARCHAR(50)
+      - customer_state VARCHAR(50)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+2. ORDERS
+   Primary Key: order_id (VARCHAR(50))
+   Foreign Keys: customer_id → customers.customer_id
+   Attributes:
+      - customer_id VARCHAR(50)
+      - order_status VARCHAR(50)           # delivered, shipped, canceled, etc.
+      - order_purchase_timestamp DATETIME
+      - order_approved_at DATETIME
+      - order_delivered_carrier_date DATETIME
+      - order_delivered_customer_date DATETIME
+      - order_estimated_delivery_date DATETIME
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+3. ORDER_ITEMS
+   Primary Key: (order_id, order_item_id)
+   Foreign Keys: 
+      - order_id → orders.order_id
+      - product_id → products.product_id
+      - seller_id → sellers.seller_id
+   Attributes:
+      - order_id VARCHAR(50)
+      - order_item_id INT
+      - product_id VARCHAR(50)
+      - seller_id VARCHAR(50)
+      - shipping_limit_date DATETIME
+      - price FLOAT                       # Item price
+      - freight_value FLOAT              # Shipping cost
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+4. PRODUCTS
+   Primary Key: product_id (VARCHAR(50))
+   Foreign Keys: product_category_name → product_category_name_translation.product_category_name
+   Attributes:
+      - product_id VARCHAR(50)
+      - product_category_name VARCHAR(100)
+      - product_name_lenght INT           # Note: typo in dataset
+      - product_description_lenght INT    # Note: typo in dataset
+      - product_photos_qty INT
+      - product_weight_g INT
+      - product_length_cm INT
+      - product_height_cm INT
+      - product_width_cm INT
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+5. SELLERS
+   Primary Key: seller_id (VARCHAR(50))
+   Attributes:
+      - seller_id VARCHAR(50)
+      - seller_zip_code_prefix INT
+      - seller_city VARCHAR(50)
+      - seller_state VARCHAR(50)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+6. ORDER_PAYMENTS
+   Primary Key: (order_id, payment_sequential)
+   Foreign Keys: order_id → orders.order_id
+   Attributes:
+      - order_id VARCHAR(50)
+      - payment_sequential INT            # Sequence for multiple payments
+      - payment_type VARCHAR(50)          # credit_card, debit_card, boleto, etc.
+      - payment_installments INT          # Number of installments
+      - payment_value FLOAT              # Payment amount
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+7. ORDER_REVIEWS
+   Primary Key: review_id (VARCHAR(50))
+   Foreign Keys: order_id → orders.order_id
+   Attributes:
+      - review_id VARCHAR(50)
+      - order_id VARCHAR(50)
+      - review_score INT                  # 1-5 rating
+      - review_comment_title TEXT
+      - review_comment_message TEXT
+      - review_creation_date DATETIME
+      - review_answer_timestamp DATETIME
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+8. GEOLOCATION
+   Primary Key: geolocation_zip_code_prefix (INT)
+   Attributes:
+      - geolocation_zip_code_prefix INT
+      - geolocation_lat FLOAT            # Latitude
+      - geolocation_lng FLOAT            # Longitude
+      - geolocation_city VARCHAR(50)
+      - geolocation_state VARCHAR(50)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+9. PRODUCT_CATEGORY_NAME_TRANSLATION
+   Primary Key: product_category_name (VARCHAR(100))
+   Attributes:
+      - product_category_name VARCHAR(100)      # Portuguese
+      - product_category_name_english VARCHAR(100)  # English translation
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📊 KIẾN TRÚC DỮ LIỆU ĐƯỢC TỔ CHỨC THEO MEDALLION:
+
+BRONZE LAYER (Raw Data):
+   - 9 bảng, dữ liệu gốc từ MySQL
+   - Định dạng: Delta Lake
+   - Vị trí: s3a://lakehouse/bronze/
+
+SILVER LAYER (Cleaned Data):
+   - 10 bảng (9 bảng gốc + silver_date + forecast_features)
+   - Quy trình: dropDuplicates(), na.drop(), type casting
+   - File: etl_pipeline/etl_pipeline/assets/silver.py
+
+GOLD LAYER (Star Schema):
+   DIMENSIONS:
+   - dim_customer
+   - dim_seller
+   - dim_product
+   - dim_product_category
+   - dim_date
+   - dim_geolocation
+   
+   FACTS:
+   - fact_order_item
+   - fact_order
+   - fact_review
+   - fact_payment
+   
+   File: etl_pipeline/etl_pipeline/assets/gold.py
+
+PLATINUM LAYER (Business Datamarts):
+   - dm_sales_monthly_category
+   - dm_seller_kpi
+   - dm_customer_lifecycle
+   - dm_payment_mix
+   - dm_logistics_sla
+   - demand_forecast (ML)
+   
+   File: etl_pipeline/etl_pipeline/assets/platinum.py
+
+📋 FILES LIÊN QUAN:
+   - load_dataset_into_mysql/01_olist.sql: Full schema
+   - etl_pipeline/etl_pipeline/assets/bronze.py: Bronze definitions
+   - etl_pipeline/etl_pipeline/assets/silver.py: Silver transformations
+   - etl_pipeline/etl_pipeline/assets/gold.py: Gold star schema
+   - etl_pipeline/etl_pipeline/assets/platinum.py: Platinum datamarts
+   - README.md (dòng 183-195): Schema overview
+   - PROJECT_OVERVIEW.md: Architecture details
+
+
+================================================================================
+📌 2.3. TIỀN XỬ LÝ & CHẤT LƯỢNG DỮ LIỆU
+================================================================================
+
+🔧 CÁC BƯỚC TIỀN XỬ LÝ ĐƯỢC ÁP DỤNG:
+
+FILE: etl_pipeline/etl_pipeline/assets/silver.py
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. SILVER_CUSTOMER:
+   - dropDuplicates(["customer_id"])
+   - filter(F.col("customer_id").isNotNull())
+   → Loại bỏ: duplicate, NULL customer_id
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+2. SILVER_SELLER:
+   - dropDuplicates(["seller_id"])
+   - na.fill("")
+   → Loại bỏ: duplicate
+   → Điền: NULL → empty string
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+3. SILVER_PRODUCT:
+   - dropDuplicates()
+   - na.drop()
+   - Fix typo: "product_name_lenght" → "product_name_length"
+   - Fix typo: "product_description_lenght" → "product_description_length"
+   - Cast: product_length_cm, height_cm, width_cm → INT
+   → Loại bỏ: duplicate, NULL, outliers
+   → Chuẩn hóa: tên cột, kiểu dữ liệu
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+4. SILVER_ORDER:
+   - dropDuplicates(["order_id"])
+   - na.drop()
+   - Cast: order_purchase_timestamp → TIMESTAMP
+   → Loại bỏ: duplicate, NULL
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+5. SILVER_ORDER_ITEM:
+   - dropDuplicates()
+   - na.drop()
+   - Round: price, freight_value → 2 decimals
+   - Cast: price, freight_value → DOUBLE
+   → Loại bỏ: duplicate, NULL
+   → Chuẩn hóa: giá trị số (precision)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+6. SILVER_PAYMENT:
+   - dropDuplicates()
+   - na.drop()
+   - Round: payment_value → 2 decimals
+   - Cast: payment_value → DOUBLE, payment_installments → INT
+   → Loại bỏ: duplicate, NULL
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+7. SILVER_ORDER_REVIEW:
+   - dropDuplicates()
+   - na.drop()
+   - drop("review_comment_title")
+   → Loại bỏ: duplicate, NULL, cột không cần
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+8. SILVER_PRODUCT_CATEGORY:
+   - dropDuplicates()
+   - na.drop()
+   → Loại bỏ: duplicate, NULL
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+9. SILVER_DATE:
+   - Generate: full_date từ order_purchase_timestamp
+   - Extract: year, month, day, day_of_week, quarter
+   → Tạo bảng date dimension
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🌍 MAPPING CATEGORY_english (Portuguese → English):
+   - File: product_category_name_translation.csv
+   - Bảng: product_category_name_translation
+   - Sử dụng trong:
+      * dim_product_category (GOLD layer)
+      * dm_sales_monthly_category (PLATINUM layer)
+   - Kết quả: category names chuẩn hóa sang tiếng Anh
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📊 CHẤT LƯỢNG DỮ LIỆU:
+
+ĐƯỢC PHÁT HIỆN VÀ XỬ LÝ:
+   ✅ Duplicate records → dropDuplicates()
+   ✅ NULL values → na.drop(), na.fill()
+   ✅ Type inconsistencies → Cast về đúng kiểu
+   ✅ Column typos → Rename chuẩn hóa
+   ✅ Precision issues → Round 2 decimals
+
+VẪN TỒN TẠI (Acceptable):
+   ℹ️ Một số product_category_name = NULL
+   ℹ️ Một số đơn hàng không có delivery date
+   ℹ️ Một số reviews không có comment
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📋 FILES LIÊN QUAN:
+   - etl_pipeline/etl_pipeline/assets/silver.py (dòng 1-180): Cleaning logic
+   - product_category_name_translation.csv: Category mapping
+   - README.md (dòng 198-250): Data layers overview
+
+
+================================================================================
+📌 2.4. YÊU CẦU PHÂN TÍCH VÀ KỊCH BẢN NGHIỆP VỤ MỤC TIÊU
+================================================================================
+
+🎯 CÁC USE CASES CHÍNH CỦA PROJECT:
+
+FILE: README.md (dòng 28-38) + PROJECT_OVERVIEW.md (dòng 13-21)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. PHÂN TÍCH DOANH THU (Revenue Analysis):
+   Mục tiêu: Theo dõi xu hướng doanh thu theo thời gian, danh mục, vùng
+   
+   KPI cần đo:
+   - GMV (Gross Merchandise Value)
+   - Revenue by category
+   - AOV (Average Order Value)
+   - Growth rate month-over-month
+   
+   Datamart: platinum.dm_sales_monthly_category
+   Dashboard: Metabase - Monthly Revenue Trend
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+2. DỰ BÁO NHU CẦU (Demand Forecasting):
+   Mục tiêu: Dự đoán nhu cầu sản phẩm 28 ngày tới
+   
+   Công nghệ:
+   - LightGBM (tree-based ML model)
+   - Time series features (lag, MA, seasonality)
+   - MLflow (experiment tracking)
+   
+   Output: platinum.demand_forecast
+   File: etl_pipeline/etl_pipeline/ml/feature_build.py
+   
+   Use cases:
+   - Inventory planning
+   - Procurement optimization
+   - Stockout prevention
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+3. PHÂN TÍCH KHÁCH HÀNG (Customer Analytics):
+   Mục tiêu: Hiểu hành vi, lifecycle, value của khách hàng
+   
+   Phân tích:
+   - Cohort analysis (first purchase date)
+   - Customer LTV (Lifetime Value)
+   - Churn detection
+   - Customer segmentation
+   
+   Datamart: platinum.dm_customer_lifecycle
+   BI Tool: Metabase dashboard
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+4. PHÂN TÍCH THANH TOÁN (Payment Mix Analysis):
+   Mục tiêu: Đánh giá phương thức thanh toán phổ biến
+   
+   Metrics:
+   - Payment type distribution
+   - Installments usage
+   - Payment trends over time
+   
+   Datamart: platinum.dm_payment_mix
+   Insight: credit_card là phương thức chính
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+5. LOGISTICS & SLA (Supply Chain Analytics):
+   Mục tiêu: Tối ưu hóa delivery, giảm delays
+   
+   KPIs:
+   - On-time delivery rate
+   - Average delivery days
+   - Late orders count
+   - Regional performance
+   
+   Datamart: platinum.dm_logistics_sla
+   Action: Identify bottlenecks, optimize routes
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+6. SELLER PERFORMANCE:
+   Mục tiêu: Đánh giá hiệu suất người bán
+   
+   Metrics:
+   - GMV per seller
+   - Order count
+   - Review score
+   - On-time delivery rate
+   - Cancel rate
+   
+   Datamart: platinum.dm_seller_kpi
+   Use: Seller ranking, commission calculation
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🎭 NGƯỜI DÙNG & TRƯỜNG HỢP SỬ DỤNG:
+
+1. BUSINESS ANALYST:
+   - Dashboard Metabase: Explore trends, drill-down
+   - Query Window (Streamlit): Ad-hoc analysis
+   - Export CSV/Excel cho báo cáo
+
+2. DATA SCIENTIST:
+   - Jupyter notebooks: Feature engineering
+   - MLflow: Model experiments
+   - Forecast pipeline: Deploy models
+
+3. BUSINESS MANAGER:
+   - Chat Interface: Ask questions in natural language
+   - "Doanh thu tháng 3 năm 2018?"
+   - "Top 10 sản phẩm bán chạy?"
+   - "Phương thức thanh toán nào phổ biến?"
+
+4. DATA ENGINEER:
+   - Dagster UI: Monitor ETL pipeline
+   - Spark UI: Debug jobs
+   - MinIO Console: Manage storage
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📊 GIAO DIỆN PHÂN TÍCH ĐƯỢC CUNG CẤP:
+
+1. STREAMLIT - Query Window (OLAP):
+   URL: http://localhost:8501
+   Features:
+   - Time grain: day/week/month/quarter/year
+   - Dimensions: product, customer, region, seller
+   - Measures: revenue, orders, units, AOV
+   - ROLLUP/GROUPING SETS
+   - Export CSV/Excel
+   
+   File: app/pages/1_📊_Query_Window.py
+
+2. METABASE - BI Dashboard:
+   URL: http://localhost:3000
+   Features:
+   - Visual query builder
+   - Pre-built dashboards
+   - Scheduled reports
+   - Email alerts
+   
+   Dashboards:
+   - Monthly Revenue Trend
+   - Top Categories
+   - Payment Mix
+   - Logistics SLA
+   - Customer Lifecycle
+
+3. CHAT INTERFACE - Natural Language Query:
+   URL: http://localhost:8501/💬_Chat
+   Tech: Gemini AI, RAG, SQL generation
+   
+   Example queries:
+   - "Doanh thu tháng 3 năm 2018"
+   - "Top 10 sản phẩm bán chạy nhất"
+   - "Phương thức thanh toán nào phổ biến nhất"
+   
+   File: app/pages/2_💬_Chat.py, chat_service/main.py
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📋 FILES LIÊN QUAN:
+   - README.md (dòng 28-38): Project goals
+   - PROJECT_OVERVIEW.md (dòng 13-21, 75-254): Features & use cases
+   - app/pages/1_📊_Query_Window.py: OLAP interface
+   - app/pages/2_💬_Chat.py: Chat interface
+   - etl_pipeline/etl_pipeline/assets/platinum.py: Datamarts
+   - metabase_queries.sql: Sample BI queries
+   - VISUALIZATION_RESULTS.md: Analysis results
+
+
+================================================================================
+📌 2.5. TIỂU KẾT CHƯƠNG
+================================================================================
+
+📝 ĐIỂM CHÍNH CẦN TÓM TẮT:
+
+✅ DATASET:
+   - Brazilian E-commerce: 100K orders, 2016-2018
+   - 9 tables: customers, orders, products, sellers, payments, reviews, etc.
+   - Source: Kaggle Olist dataset
+
+✅ SCHEMA:
+   - Bronze → Silver → Gold → Platinum (Medallion architecture)
+   - Star schema: 6 dimensions + 4 facts (Gold layer)
+   - 7 business datamarts (Platinum layer)
+
+✅ DATA QUALITY:
+   - Cleaned: duplicates, NULLs, type casting
+   - Fixed: column typos (lenght → length)
+   - Mapped: category Portuguese → English
+
+✅ USE CASES:
+   - Revenue analysis & forecasting
+   - Customer lifecycle & LTV
+   - Logistics SLA optimization
+   - Payment mix analysis
+   - Seller performance ranking
+
+✅ INTERFACES:
+   - Streamlit (Query Window) - OLAP analysis
+   - Metabase - BI dashboards
+   - Chat Interface - Natural language queries
+
+📊 KIẾN TRÚC:
+   Modern Data Stack với containerized deployment
+   - Storage: Delta Lake trên MinIO
+   - Compute: Apache Spark
+   - Query: Trino
+   - ML: LightGBM + MLflow
+   - Orchestration: Dagster
+
+🎯 KẾT QUẢ:
+   Data Lakehouse production-ready với:
+   - ETL pipeline tự động
+   - ML forecasting 28-day horizon
+   - OLAP query interface
+   - AI-powered chat
+   - BI dashboards
+
+
+================================================================================
+📁 DANH SÁCH FILE CẦN ĐỌC ĐỂ VIẾT BÁO CÁO
+================================================================================
+
+MUST READ:
+   1. README.md (dòng 28-195)
+   2. PROJECT_OVERVIEW.md (toàn bộ)
+   3. load_dataset_into_mysql/01_olist.sql (full schema)
+   4. etl_pipeline/etl_pipeline/assets/silver.py (cleaning logic)
+   5. etl_pipeline/etl_pipeline/assets/gold.py (star schema)
+   6. etl_pipeline/etl_pipeline/assets/platinum.py (datamarts)
+
+NICE TO HAVE:
+   7. VISUALIZATION_RESULTS.md (analysis results)
+   8. app/pages/1_📊_Query_Window.py (OLAP interface)
+   9. app/pages/2_💬_Chat.py (Chat interface)
+   10. metabase_queries.sql (sample BI queries)
+
+================================================================================
+EOF
+
+
