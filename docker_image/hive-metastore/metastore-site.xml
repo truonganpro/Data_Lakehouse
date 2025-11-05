@@ -51,4 +51,32 @@
     <name>fs.s3a.path.style.access</name>
     <value>true</value>
   </property>
+  
+  <!-- Concurrency & Transaction Management -->
+  <property>
+    <name>hive.support.concurrency</name>
+    <value>true</value>
+  </property>
+  <property>
+    <name>hive.txn.manager</name>
+    <value>org.apache.hadoop.hive.ql.lockmgr.DbTxnManager</value>
+  </property>
+  <property>
+    <name>hive.compactor.initiator.on</name>
+    <value>true</value>
+  </property>
+  <property>
+    <name>hive.compactor.worker.threads</name>
+    <value>2</value>
+  </property>
+  <property>
+    <name>metastore.task.threads.always</name>
+    <value>org.apache.hadoop.hive.metastore.events.EventCleanerTask</value>
+  </property>
+  
+  <!-- Connection Pool -->
+  <property>
+    <name>datanucleus.connectionPool.maxPoolSize</name>
+    <value>50</value>
+  </property>
 </configuration>

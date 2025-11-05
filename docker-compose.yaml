@@ -7,21 +7,24 @@ services:
   de_mysql:
     image: mysql:8.0
     container_name: de_mysql
-    command: --default-authentication-plugin=mysql_native_password
+    command: --default-authentication-plugin=mysql_native_password --defaults-file=/etc/mysql/my.cnf
     volumes:
       - ./mysql:/var/lib/mysql
       - ./load_dataset_into_mysql:/docker-entrypoint-initdb.d:ro
+      - ./docker_image/mysql/my.cnf:/etc/mysql/my.cnf:ro
     ports:
       - "3306:3306"
     env_file:
       - .env
     networks:
       - de_network
+    restart: unless-stopped
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "de_mysql", "-u$$MYSQL_USER", "-p$$MYSQL_PASSWORD"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p$$MYSQL_ROOT_PASSWORD"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 30s
 
   # ========================
   # 🐝 HIVE METASTORE
@@ -34,6 +37,12 @@ services:
     depends_on:
       de_mysql:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "bash", "-c", "nc -z localhost 9083 || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 60s
     environment:
       - DB_TYPE=mysql
       - DB_HOST=de_mysql
@@ -42,6 +51,7 @@ services:
       - DB_USER=hive
       - DB_PASS=hive
       - HADOOP_OPTS=-Djava.net.preferIPv4Stack=true
+      - JAVA_TOOL_OPTIONS=-Xms256m -Xmx1024m
     volumes:
       - ./docker_image/hive-metastore/metastore-site.xml:/opt/apache-hive-metastore-3.0.0-bin/conf/metastore-site.xml:ro
     ports:
@@ -202,12 +212,21 @@ services:
       - JARS_DIR=/opt/jars
       - SPARK_DIST_CLASSPATH=/opt/jars/*
       - DAGSTER_HOME=/opt/dagster/dagster_home
+      - MLFLOW_TRACKING_URI=mysql+pymysql://mlflow:mlflow@de_mysql:3306/mlflowdb
+      - MLFLOW_S3_ENDPOINT_URL=http://minio:9000
+      - AWS_ACCESS_KEY_ID=minio
+      - AWS_SECRET_ACCESS_KEY=minio123
     env_file:
       - .env
     depends_on:
-      - spark-master
-      - minio
-      - de_mysql
+      spark-master:
+        condition: service_started
+      minio:
+        condition: service_started
+      de_mysql:
+        condition: service_healthy
+      hive-metastore:
+        condition: service_started
     networks:
       - de_network
 
@@ -223,7 +242,10 @@ services:
     env_file:
       - .env
     depends_on:
-      - de_mysql
+      de_mysql:
+        condition: service_healthy
+      hive-metastore:
+        condition: service_started
     networks:
       - de_network
 
@@ -231,8 +253,12 @@ services:
     build:
       context: ./dagster/
     depends_on:
-      - de_dagster
-      - etl_pipeline
+      de_mysql:
+        condition: service_healthy
+      de_dagster:
+        condition: service_started
+      etl_pipeline:
+        condition: service_started
     entrypoint: ["dagster-webserver"]
     command: ["-h", "0.0.0.0", "-p", "3001", "-w", "/opt/dagster/dagster_home/workspace.yaml"]
     container_name: de_dagster_dagit
@@ -250,7 +276,12 @@ services:
     build:
       context: ./dagster/
     depends_on:
-      - de_dagster
+      de_mysql:
+        condition: service_healthy
+      de_dagster:
+        condition: service_started
+      hive-metastore:
+        condition: service_started
     entrypoint:
       - dagster-daemon
       - run
