@@ -217,8 +217,8 @@ with tab_services:
     
     with sc1:
         st.markdown("<div class='section-title'><h3>📊 Phân tích dữ liệu</h3></div>", unsafe_allow_html=True)
-        
-        # Query Window
+    
+    # Query Window
         st.markdown("""
         <div class='service-card'>
         <div class='title'>🧮 Query Window</div>
@@ -250,8 +250,8 @@ with tab_services:
         st.page_link("pages/3_📈_Forecast_Explorer.py", label="Mở Forecast Explorer", icon="📈", use_container_width=True)
         
         st.markdown("")
-        
-        # Metabase
+    
+    # Metabase
         st.markdown("""
         <div class='service-card'>
         <div class='title'>📊 Metabase</div>
@@ -262,8 +262,8 @@ with tab_services:
     
     with sc2:
         st.markdown("<div class='section-title'><h3>🛠️ Vận hành & Quản lý</h3></div>", unsafe_allow_html=True)
-        
-        # Dagster
+    
+    # Dagster
         st.markdown("""
         <div class='service-card'>
         <div class='title'>⚙️ Dagster</div>
@@ -273,8 +273,8 @@ with tab_services:
         st.link_button("Mở Dagster", "http://localhost:3001", use_container_width=True)
         
         st.markdown("")
-        
-        # MinIO
+    
+    # MinIO
         st.markdown("""
         <div class='service-card'>
         <div class='title'>🪣 MinIO Console</div>
@@ -877,7 +877,7 @@ FILE: docker-compose.yaml (streamlit service)
     volumes:
       - ./app:/app
     networks:
-      - de_network
+      - de_network 
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
