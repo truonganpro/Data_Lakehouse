@@ -20,7 +20,7 @@ from sqlalchemy import create_engine, text
 from sql_templates import intent_to_sql, get_safe_schemas, get_example_questions, NO_SQL
 from embeddings import embed_query
 from llm_sql import gen_sql_with_gemini
-from llm_summarize import format_answer
+from llm_summarize import format_answer, _parse_schema_from_sql
 from router import get_router
 from errors import GuardError, GuardCode
 from guard_message import message_and_suggestions
@@ -546,11 +546,10 @@ def run_sql(sql: str, schema: str = TRINO_DEFAULT_SCHEMA, check_empty: bool = Fa
 def build_sql(question: str) -> Tuple[Optional[str], Optional[Dict]]:
     """
     Build SQL query using multi-tier approach:
-    1. Check non-SQL modes (smalltalk, about_data, about_project)
-    2. Check HELP mode
-    3. Try old templates (backward compatibility)
-    4. Try router + skills (NEW)
-    5. Fallback to Gemini LLM
+    1. Check non-SQL modes (smalltalk, about_data, about_project) - quick check
+    2. Try router + skills FIRST (optimized queries, e.g., platinum datamart)
+    3. Fallback to legacy templates (backward compatibility)
+    4. Fallback to Gemini LLM (for complex queries)
     
     Args:
         question: User's question
@@ -563,24 +562,29 @@ def build_sql(question: str) -> Tuple[Optional[str], Optional[Dict]]:
         - None: No match found
         - metadata: Dict with topic info for non-SQL responses
     """
-    # 1. Check non-SQL modes first (smalltalk, about_data, about_project)
-    sql, metadata = intent_to_sql(question)
+    q_lower = question.lower().strip()
     
-    if sql == NO_SQL:
-        topic = metadata.get("topic") if metadata else "unknown"
-        print(f"💬 Non-SQL mode triggered: {topic} for: {question}")
-        return NO_SQL, metadata
+    # 1. Quick check for non-SQL modes (smalltalk, about_data, about_project)
+    # Use direct check instead of intent_to_sql to avoid legacy template matching
+    from sql_templates import SMALLTALK_TRIGGERS, ABOUT_DATA_TRIGGERS, ABOUT_PROJECT_TRIGGERS, HELP_TRIGGERS
     
-    if sql == "":
-        print(f"💡 HELP MODE triggered for: {question}")
+    if any(trigger in q_lower for trigger in SMALLTALK_TRIGGERS):
+        # Check if it's a personal question
+        is_personal = any(kw in q_lower for kw in ["bạn là ai", "tôi là ai", "bạn biết tôi", "who are you", "who am i"])
+        if is_personal or not _has_data_entities_in_question(question):
+            return NO_SQL, {"topic": "smalltalk"}
+    
+    if any(trigger in q_lower for trigger in ABOUT_DATA_TRIGGERS):
+        return NO_SQL, {"topic": "about_data"}
+    
+    if any(trigger in q_lower for trigger in ABOUT_PROJECT_TRIGGERS):
+        return NO_SQL, {"topic": "about_project"}
+    
+    if any(trigger in q_lower for trigger in HELP_TRIGGERS):
         return "", None
     
-    # 2. Try old templates (for backward compatibility)
-    if sql:
-        print(f"✅ Using legacy template SQL for: {question}")
-        return sql, None
-    
-    # 3. NEW: Try router + skills system
+    # 2. Try router + skills system FIRST (priority - optimized queries)
+    # This ensures we use platinum datamart for monthly revenue queries
     try:
         router = get_router()
         sql, router_metadata = router.generate_sql(question, threshold=0.6)
@@ -593,6 +597,23 @@ def build_sql(question: str) -> Tuple[Optional[str], Optional[Dict]]:
     except Exception as e:
         print(f"⚠️  Router error: {e}")
     
+    # 3. Fallback to legacy templates (for backward compatibility)
+    # Only use if router didn't match
+    sql, metadata = intent_to_sql(question)
+    
+    if sql == NO_SQL:
+        topic = metadata.get("topic") if metadata else "unknown"
+        print(f"💬 Non-SQL mode triggered: {topic} for: {question}")
+        return NO_SQL, metadata
+    
+    if sql == "":
+        print(f"💡 HELP MODE triggered for: {question}")
+        return "", None
+    
+    if sql:
+        print(f"✅ Using legacy template SQL for: {question}")
+        return sql, None
+    
     # 4. Fallback to Gemini LLM (for complex queries)
     if os.getenv("LLM_PROVIDER", "none").lower() == "gemini":
         print(f"🤖 Falling back to Gemini for: {question}")
@@ -602,6 +623,18 @@ def build_sql(question: str) -> Tuple[Optional[str], Optional[Dict]]:
     
     # 5. No SQL generated
     return None, None
+
+
+def _has_data_entities_in_question(question: str) -> bool:
+    """Quick check if question contains data-related keywords"""
+    q_lower = question.lower()
+    data_keywords = [
+        "doanh thu", "revenue", "gmv", "orders", "đơn hàng", "sản phẩm", "product",
+        "tháng", "month", "tuần", "week", "ngày", "day", "năm", "year",
+        "thanh toán", "payment", "khách hàng", "customer", "seller", "người bán",
+        "danh mục", "category", "vùng", "region", "bang", "state"
+    ]
+    return any(kw in q_lower for kw in data_keywords)
 
 
 # ============================================================================

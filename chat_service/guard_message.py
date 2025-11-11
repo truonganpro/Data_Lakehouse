@@ -2,7 +2,7 @@
 Guard error messages and suggestions
 Maps error codes to user-friendly messages and quick-reply suggestions
 """
-from chat_service.errors import GuardCode
+from errors import GuardCode
 from typing import Tuple, List, Optional, Dict
 
 
