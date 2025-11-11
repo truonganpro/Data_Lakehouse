@@ -25,6 +25,7 @@ from skills.market_share import MarketShareSkill
 from skills.aov_analysis import AOVAnalysisSkill
 from skills.recent_orders import RecentOrdersSkill
 from skills.top_sellers_sla import TopSellersSLASkill
+from skills.cohort_retention import CohortRetentionSkill
 
 
 class IntentRouter:
@@ -48,6 +49,7 @@ class IntentRouter:
             AOVAnalysisSkill(),
             RecentOrdersSkill(),
             TopSellersSLASkill(),
+            CohortRetentionSkill(),
         ]
         
         # Sort by priority

@@ -36,8 +36,8 @@ class DistributionRegionSkill(BaseSkill):
             SUM(i.price + i.freight_value) AS gmv,
             ROUND(SUM(i.price + i.freight_value) / NULLIF(COUNT(DISTINCT i.order_id), 0), 2) AS aov,
             COUNT(DISTINCT i.product_id) AS unique_products
-        FROM lakehouse.gold.factorderitem i
-        LEFT JOIN lakehouse.gold.dimseller s ON i.seller_id = s.seller_id
+        FROM lakehouse.gold.fact_order_item i
+        LEFT JOIN lakehouse.gold.dim_seller s ON i.seller_id = s.seller_id
         WHERE i.full_date BETWEEN DATE '{start}' AND DATE '{end}'
           AND i.full_date IS NOT NULL
         GROUP BY 1

@@ -39,9 +39,9 @@ class CategoryRevenueSkill(BaseSkill):
             COUNT(DISTINCT i.order_id) AS orders,
             COUNT(*) AS units,
             ROUND(SUM(i.price) / NULLIF(COUNT(DISTINCT i.order_id), 0), 2) AS aov
-        FROM lakehouse.gold.factorderitem i
-        LEFT JOIN lakehouse.gold.dimproduct p ON i.product_id = p.product_id
-        LEFT JOIN lakehouse.gold.dimproductcategory pc 
+        FROM lakehouse.gold.fact_order_item i
+        LEFT JOIN lakehouse.gold.dim_product p ON i.product_id = p.product_id
+        LEFT JOIN lakehouse.gold.dim_product_category pc 
           ON p.product_category_name = pc.product_category_name
         WHERE i.full_date BETWEEN DATE '{start}' AND DATE '{end}'
           AND i.full_date IS NOT NULL

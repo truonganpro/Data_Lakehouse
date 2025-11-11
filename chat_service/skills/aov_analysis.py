@@ -40,7 +40,7 @@ class AOVAnalysisSkill(BaseSkill):
                 ROUND(SUM(f.sum_price + f.sum_freight) / NULLIF(COUNT(DISTINCT f.order_id), 0), 2) AS aov,
                 COUNT(DISTINCT f.order_id) AS orders,
                 SUM(f.sum_price + f.sum_freight) AS total_revenue
-            FROM lakehouse.gold.factorder f
+            FROM lakehouse.gold.fact_order f
             WHERE f.full_date BETWEEN DATE '{start}' AND DATE '{end}'
               AND f.full_date IS NOT NULL
             GROUP BY 1
@@ -55,8 +55,8 @@ class AOVAnalysisSkill(BaseSkill):
                 ROUND(SUM(i.price + i.freight_value) / NULLIF(COUNT(DISTINCT i.order_id), 0), 2) AS aov,
                 COUNT(DISTINCT i.order_id) AS orders,
                 SUM(i.price + i.freight_value) AS total_revenue
-            FROM lakehouse.gold.factorderitem i
-            LEFT JOIN lakehouse.gold.dimseller s ON i.seller_id = s.seller_id
+            FROM lakehouse.gold.fact_order_item i
+            LEFT JOIN lakehouse.gold.dim_seller s ON i.seller_id = s.seller_id
             WHERE i.full_date BETWEEN DATE '{start}' AND DATE '{end}'
               AND i.full_date IS NOT NULL
             GROUP BY 1
@@ -71,9 +71,9 @@ class AOVAnalysisSkill(BaseSkill):
                 ROUND(SUM(i.price + i.freight_value) / NULLIF(COUNT(DISTINCT i.order_id), 0), 2) AS aov,
                 COUNT(DISTINCT i.order_id) AS orders,
                 SUM(i.price + i.freight_value) AS total_revenue
-            FROM lakehouse.gold.factorderitem i
-            LEFT JOIN lakehouse.gold.dimproduct p ON i.product_id = p.product_id
-            LEFT JOIN lakehouse.gold.dimproductcategory pc 
+            FROM lakehouse.gold.fact_order_item i
+            LEFT JOIN lakehouse.gold.dim_product p ON i.product_id = p.product_id
+            LEFT JOIN lakehouse.gold.dim_product_category pc 
               ON p.product_category_name = pc.product_category_name
             WHERE i.full_date BETWEEN DATE '{start}' AND DATE '{end}'
               AND i.full_date IS NOT NULL

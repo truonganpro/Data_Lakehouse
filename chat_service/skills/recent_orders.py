@@ -38,7 +38,7 @@ class RecentOrdersSkill(BaseSkill):
             f.sum_price + f.sum_freight AS gmv,
             f.delivered_on_time,
             f.is_canceled
-        FROM lakehouse.gold.factorder f
+        FROM lakehouse.gold.fact_order f
         WHERE f.full_date IS NOT NULL
         ORDER BY f.full_date DESC
         LIMIT {limit}

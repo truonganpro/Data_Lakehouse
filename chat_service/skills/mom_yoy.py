@@ -35,7 +35,7 @@ class MoMYoYSkill(BaseSkill):
                 date_trunc('month', f.full_date) AS month,
                 SUM(f.sum_price + f.sum_freight) AS gmv,
                 COUNT(DISTINCT f.order_id) AS orders
-            FROM lakehouse.gold.factorder f
+            FROM lakehouse.gold.fact_order f
             WHERE f.full_date BETWEEN DATE '{start}' AND DATE '{end}'
               AND f.full_date IS NOT NULL
             GROUP BY 1

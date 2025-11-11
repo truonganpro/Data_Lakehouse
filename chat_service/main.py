@@ -6,7 +6,7 @@ import os
 import re
 import time
 import uuid
-from typing import Optional, List, Set, Tuple
+from typing import Optional, List, Set, Tuple, Dict, Union
 from datetime import datetime
 
 from fastapi import FastAPI, HTTPException
@@ -17,11 +17,14 @@ from trino.dbapi import connect
 from qdrant_client import QdrantClient
 from sqlalchemy import create_engine, text
 
-from sql_templates import intent_to_sql, get_safe_schemas, get_example_questions
+from sql_templates import intent_to_sql, get_safe_schemas, get_example_questions, NO_SQL
 from embeddings import embed_query
 from llm_sql import gen_sql_with_gemini
 from llm_summarize import format_answer
 from router import get_router
+from errors import GuardError, GuardCode
+from guard_message import message_and_suggestions
+from suggestions import suggestions_for, suggestions_for_non_sql
 
 # SQL parsing for safety
 try:
@@ -102,6 +105,7 @@ class AskResponse(BaseModel):
     rows_preview: Optional[List[dict]] = None
     citations: Optional[List[dict]] = None
     execution_time_ms: Optional[int] = None
+    suggestions: Optional[List[str]] = None  # Context-aware suggestions
 
 
 # ============================================================================
@@ -182,7 +186,7 @@ def _check_dangerous_keywords_with_ast(sql: str) -> Tuple[bool, Optional[str]]:
     Returns:
         Tuple of (has_dangerous_keyword, keyword_if_found)
     """
-    dangerous = ["DELETE", "DROP", "TRUNCATE", "ALTER", "CREATE", "INSERT", "UPDATE"]
+    dangerous = ["DELETE", "DROP", "TRUNCATE", "ALTER", "CREATE", "INSERT", "UPDATE", "SHOW", "EXPLAIN", "CALL", "EXEC", "EXECUTE"]
     
     if not SQLGLOT_AVAILABLE:
         # Fallback: substring check (original behavior)
@@ -201,7 +205,7 @@ def _check_dangerous_keywords_with_ast(sql: str) -> Tuple[bool, Optional[str]]:
         # Find dangerous operation types dynamically
         dangerous_types = []
         for attr in dir(sqlglot.expressions):
-            if attr in ['Delete', 'Drop', 'Update', 'Insert', 'Create', 'AlterTable', 'Truncate']:
+            if attr in ['Delete', 'Drop', 'Update', 'Insert', 'Create', 'AlterTable', 'Truncate', 'Show', 'Explain']:
                 dangerous_types.append(getattr(sqlglot.expressions, attr))
         
         for dangerous_type in dangerous_types:
@@ -220,21 +224,135 @@ def _check_dangerous_keywords_with_ast(sql: str) -> Tuple[bool, Optional[str]]:
         return False, None
 
 
-def enforce_sql_safety(sql: str) -> str:
+def _check_star_projection(sql: str) -> bool:
+    """
+    Check if SQL uses SELECT * (star projection)
+    
+    Args:
+        sql: SQL query string
+        
+    Returns:
+        True if SELECT * is found
+    """
+    if not SQLGLOT_AVAILABLE:
+        # Fallback: regex check
+        # Match SELECT * but not SELECT COUNT(*) or SELECT SUM(*)
+        pattern = re.compile(r"SELECT\s+\*\s+FROM", re.IGNORECASE)
+        return bool(pattern.search(sql))
+    
+    try:
+        parsed = sqlglot.parse_one(sql, dialect="trino")
+        if not parsed:
+            return False
+        
+        # Find all SELECT statements
+        for select in parsed.find_all(sqlglot.expressions.Select):
+            for expr in select.expressions:
+                if isinstance(expr, sqlglot.expressions.Star):
+                    # Check if it's not inside an aggregate function
+                    parent = expr.parent
+                    if parent and isinstance(parent, (sqlglot.expressions.Count, sqlglot.expressions.Sum, sqlglot.expressions.Avg)):
+                        continue
+                    return True
+        return False
+    except Exception:
+        # Fallback: regex
+        pattern = re.compile(r"SELECT\s+\*\s+FROM", re.IGNORECASE)
+        return bool(pattern.search(sql))
+
+
+def _check_missing_time_predicate(sql: str) -> bool:
+    """
+    Check if SQL queries large fact tables without time predicate
+    
+    Args:
+        sql: SQL query string
+        
+    Returns:
+        True if missing time predicate for large fact tables
+    """
+    # Large fact tables that require time filter
+    large_fact_tables = ["fact_order", "fact_order_item"]
+    time_columns = ["full_date", "year_month", "order_date"]
+    
+    if not SQLGLOT_AVAILABLE:
+        # Fallback: simple regex check
+        sql_lower = sql.lower()
+        has_large_fact = any(table in sql_lower for table in large_fact_tables)
+        if not has_large_fact:
+            return False
+        
+        # Check if any time column is used in WHERE clause
+        has_time_pred = any(
+            col in sql_lower and (
+                f"where" in sql_lower and col in sql_lower.split("where")[1] if "where" in sql_lower else False
+            )
+            for col in time_columns
+        )
+        return not has_time_pred
+    
+    try:
+        parsed = sqlglot.parse_one(sql, dialect="trino")
+        if not parsed:
+            return False
+        
+        # Check if query touches large fact tables
+        has_large_fact = False
+        for table in parsed.find_all(sqlglot.expressions.Table):
+            table_name = table.name.lower() if hasattr(table, "name") else ""
+            if any(ft in table_name for ft in large_fact_tables):
+                has_large_fact = True
+                break
+        
+        if not has_large_fact:
+            return False
+        
+        # Check if WHERE clause contains time predicates
+        where_clauses = parsed.find_all(sqlglot.expressions.Where)
+        if not where_clauses:
+            return True  # No WHERE clause = missing time predicate
+        
+        # Check if any time column is referenced in WHERE
+        where_str = str(where_clauses[0]).lower()
+        has_time_pred = any(col in where_str for col in time_columns)
+        
+        return not has_time_pred
+        
+    except Exception:
+        # Fallback: simple check
+        sql_lower = sql.lower()
+        has_large_fact = any(table in sql_lower for table in large_fact_tables)
+        if not has_large_fact:
+            return False
+        
+        has_time_pred = any(col in sql_lower for col in time_columns)
+        return not has_time_pred
+
+
+def enforce_sql_safety(sql: str, raise_guard_error: bool = True) -> str:
     """
     Enforce SQL safety constraints using AST when available
     
+    Args:
+        sql: SQL query string
+        raise_guard_error: If True, raise GuardError instead of HTTPException
+    
     Raises:
-        HTTPException if SQL is unsafe
+        GuardError if raise_guard_error=True and SQL is unsafe
+        HTTPException if raise_guard_error=False and SQL is unsafe
         
     Returns:
         Modified SQL with safety constraints
     """
     if not sql or not sql.strip():
+        if raise_guard_error:
+            raise GuardError(GuardCode.AMBIGUOUS_INTENT, "SQL query is empty")
         raise HTTPException(status_code=400, detail="SQL query is empty")
     
     # Must be SELECT or WITH (read-only)
     if not READONLY_PATTERN.match(sql):
+        if raise_guard_error:
+            raise GuardError(GuardCode.BANNED_FUNC, "Only SELECT and WITH queries are allowed (read-only)")
         raise HTTPException(
             status_code=400,
             detail="Only SELECT and WITH queries are allowed (read-only)"
@@ -243,41 +361,127 @@ def enforce_sql_safety(sql: str) -> str:
     # Check for dangerous keywords using AST (more accurate)
     has_dangerous, keyword = _check_dangerous_keywords_with_ast(sql)
     if has_dangerous:
+        if raise_guard_error:
+            raise GuardError(GuardCode.BANNED_FUNC, f"Dangerous keyword '{keyword}' not allowed")
         raise HTTPException(
             status_code=400,
             detail=f"Dangerous keyword '{keyword}' not allowed"
         )
     
-    # Enforce LIMIT if not present
-    sql_upper = sql.upper()
-    if "LIMIT" not in sql_upper:
-        sql = f"{sql.rstrip(';')} LIMIT {SQL_DEFAULT_LIMIT}"
+    # Check for SELECT * (star projection)
+    if _check_star_projection(sql):
+        if raise_guard_error:
+            raise GuardError(GuardCode.STAR_PROJECTION, "SELECT * is not allowed for safety")
+        raise HTTPException(
+            status_code=400,
+            detail="SELECT * is not allowed for safety"
+        )
+    
+    # Check for missing time predicate on large fact tables
+    if _check_missing_time_predicate(sql):
+        if raise_guard_error:
+            raise GuardError(GuardCode.MISSING_TIME_PRED, "Large fact tables require time predicate")
+        # Don't raise error here, just warn (allow queries without time filter for small tables)
+        print("⚠️  Warning: Query on large fact table without time predicate")
     
     # Check whitelist schemas using AST (more accurate)
     schemas = _parse_sql_schemas(sql)
     has_safe_schema = bool(schemas.intersection(SQL_WHITELIST_SCHEMAS))
     
     if not has_safe_schema:
+        if raise_guard_error:
+            raise GuardError(GuardCode.DISALLOWED_SCHEMA, f"Query must use one of these schemas: {', '.join(SQL_WHITELIST_SCHEMAS)}")
         raise HTTPException(
             status_code=400,
             detail=f"Query must use one of these schemas: {', '.join(SQL_WHITELIST_SCHEMAS)}"
         )
     
+    # Check for LIMIT (outermost)
+    # Note: We check before adding LIMIT to detect if user forgot it
+    sql_upper = sql.upper()
+    has_limit = bool(re.search(r"\bLIMIT\s+\d+\b", sql_upper))
+    
+    # Only enforce LIMIT if missing (but don't raise error, just add it)
+    # We'll raise error only if user explicitly requests without LIMIT
+    if not has_limit:
+        # Add LIMIT automatically (don't raise error for this)
+        sql = f"{sql.rstrip(';')} LIMIT {SQL_DEFAULT_LIMIT}"
+    
     return sql
 
 
-def run_sql(sql: str, schema: str = TRINO_DEFAULT_SCHEMA) -> tuple:
+def enrich_with_product_info(rows: list[dict]) -> list[dict]:
+    """
+    If result has product_id, attach product info from dim tables.
+    This is a safety net: even if SQL doesn't join dim tables, we enrich here.
+    """
+    if not rows or "product_id" not in rows[0]:
+        return rows
+    
+    # Get unique product_ids, limit for safety
+    pids = list({r["product_id"] for r in rows if r.get("product_id")})
+    if not pids:
+        return rows
+    pids = pids[:500]  # safety cap
+    
+    # Build lookup SQL
+    placeholders = ",".join(f"'{pid}'" for pid in pids)
+    lookup_sql = f"""
+    SELECT
+      p.product_id,
+      COALESCE(pc.product_category_name_english, 'unknown') AS category_en,
+      p.product_weight_g,
+      p.product_length_cm,
+      p.product_height_cm,
+      p.product_width_cm
+    FROM {TRINO_CATALOG}.gold.dim_product p
+    LEFT JOIN {TRINO_CATALOG}.gold.dim_product_category pc
+      ON pc.product_category_name = p.product_category_name
+    WHERE p.product_id IN ({placeholders})
+    LIMIT {len(pids)}
+    """
+    
+    try:
+        # Run lookup through run_sql (reuses guardrails)
+        info_rows, _ = run_sql(lookup_sql, schema="gold")
+        info_map = {r["product_id"]: r for r in info_rows}
+        
+        # Merge into original results (don't overwrite existing columns)
+        enriched = []
+        for r in rows:
+            pid = r.get("product_id")
+            if pid in info_map:
+                # Merge: existing values take priority
+                merged = {**info_map[pid], **r}
+                enriched.append(merged)
+            else:
+                enriched.append(r)
+        
+        return enriched
+    except Exception as e:
+        # If enrichment fails, return original rows
+        print(f"⚠️  Product enrichment failed: {e}")
+        return rows
+
+
+def run_sql(sql: str, schema: str = TRINO_DEFAULT_SCHEMA, check_empty: bool = False) -> tuple:
     """
     Execute SQL query on Trino
     
     Args:
         sql: SQL query string
         schema: Default schema
+        check_empty: If True, raise GuardError when no rows returned (default: False)
         
     Returns:
         Tuple of (rows, execution_time_ms)
+        
+    Raises:
+        GuardError if check_empty=True and no rows returned
+        HTTPException for other SQL errors
     """
-    sql = enforce_sql_safety(sql)
+    # Use GuardError for better error handling
+    sql = enforce_sql_safety(sql, raise_guard_error=True)
     
     start_time = time.time()
     
@@ -309,11 +513,26 @@ def run_sql(sql: str, schema: str = TRINO_DEFAULT_SCHEMA) -> tuple:
             # Convert to list of dicts
             result = [dict(zip(columns, row)) for row in rows]
             
+            # Check for empty result if requested
+            if check_empty and len(result) == 0:
+                raise GuardError(GuardCode.NO_DATA, "Query returned 0 rows")
+            
+    except GuardError:
+        # Re-raise GuardError as-is
+        raise
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"SQL execution error: {str(e)}"
-        )
+        # Wrap other errors as GuardError or HTTPException
+        error_msg = str(e)
+        if "TABLE_NOT_FOUND" in error_msg or "does not exist" in error_msg:
+            raise GuardError(GuardCode.DISALLOWED_SCHEMA, f"Table not found: {error_msg}")
+        elif "SYNTAX_ERROR" in error_msg or "syntax" in error_msg.lower():
+            raise GuardError(GuardCode.AMBIGUOUS_INTENT, f"SQL syntax error: {error_msg}")
+        else:
+            # For other errors, raise HTTPException (backward compatibility)
+            raise HTTPException(
+                status_code=500,
+                detail=f"SQL execution error: {error_msg}"
+            )
     
     execution_time = int((time.time() - start_time) * 1000)
     
@@ -324,41 +543,53 @@ def run_sql(sql: str, schema: str = TRINO_DEFAULT_SCHEMA) -> tuple:
 # SQL Generation (Template + Gemini)
 # ============================================================================
 
-def build_sql(question: str) -> str | None:
+def build_sql(question: str) -> Tuple[Optional[str], Optional[Dict]]:
     """
     Build SQL query using multi-tier approach:
-    1. Check HELP mode
-    2. Try old templates (backward compatibility)
-    3. Try router + skills (NEW)
-    4. Fallback to Gemini LLM
+    1. Check non-SQL modes (smalltalk, about_data, about_project)
+    2. Check HELP mode
+    3. Try old templates (backward compatibility)
+    4. Try router + skills (NEW)
+    5. Fallback to Gemini LLM
     
     Args:
         question: User's question
         
     Returns:
-        SQL query string, empty string (HELP mode), or None
+        Tuple of (SQL query string or NO_SQL or empty string or None, metadata dict or None)
+        - SQL string: Normal SQL query
+        - Empty string "": HELP mode
+        - NO_SQL: Non-SQL response (smalltalk, about_data, about_project)
+        - None: No match found
+        - metadata: Dict with topic info for non-SQL responses
     """
-    # 1. Check HELP MODE first
-    sql = intent_to_sql(question)
+    # 1. Check non-SQL modes first (smalltalk, about_data, about_project)
+    sql, metadata = intent_to_sql(question)
+    
+    if sql == NO_SQL:
+        topic = metadata.get("topic") if metadata else "unknown"
+        print(f"💬 Non-SQL mode triggered: {topic} for: {question}")
+        return NO_SQL, metadata
+    
     if sql == "":
         print(f"💡 HELP MODE triggered for: {question}")
-        return ""
+        return "", None
     
     # 2. Try old templates (for backward compatibility)
     if sql:
         print(f"✅ Using legacy template SQL for: {question}")
-        return sql
+        return sql, None
     
     # 3. NEW: Try router + skills system
     try:
         router = get_router()
-        sql, metadata = router.generate_sql(question, threshold=0.6)
+        sql, router_metadata = router.generate_sql(question, threshold=0.6)
         
         if sql:
-            skill_name = metadata.get('skill_name', 'unknown')
-            confidence = metadata.get('confidence', 0)
+            skill_name = router_metadata.get('skill_name', 'unknown')
+            confidence = router_metadata.get('confidence', 0)
             print(f"✅ Using skill '{skill_name}' (confidence: {confidence:.2f})")
-            return sql
+            return sql, router_metadata
     except Exception as e:
         print(f"⚠️  Router error: {e}")
     
@@ -367,10 +598,10 @@ def build_sql(question: str) -> str | None:
         print(f"🤖 Falling back to Gemini for: {question}")
         sql = gen_sql_with_gemini(question)
         if sql:
-            return sql
+            return sql, None
     
     # 5. No SQL generated
-    return None
+    return None, None
 
 
 # ============================================================================
@@ -512,12 +743,114 @@ def ask(request: AskRequest):
     citations = None
     total_execution_time = 0
     error_msg = None
+    non_sql_metadata = None
+    skill_metadata = None
+    guard_code = None
+    source_schema = None
+    suggestions = None
     
-    # 1. Generate SQL
+    # 1. Generate SQL (or detect non-SQL modes)
     if request.prefer_sql:
-        sql_query = build_sql(question)
+        sql_query, metadata = build_sql(question)
         
-        # 1a. HELP MODE - return suggestions instead of error
+        # Store metadata for suggestions
+        if metadata:
+            if sql_query and sql_query != NO_SQL and sql_query != "":
+                # SQL was generated, metadata is from router/skill
+                skill_metadata = metadata
+            else:
+                # Non-SQL mode, metadata is from intent_to_sql
+                non_sql_metadata = metadata
+        elif sql_query and sql_query != NO_SQL and sql_query != "":
+            # SQL generated but no metadata (legacy template)
+            skill_metadata = {}
+        
+        # 1a. Non-SQL modes (smalltalk, about_data, about_project)
+        if sql_query == NO_SQL:
+            topic = metadata.get("topic") if metadata else "unknown"
+            non_sql_metadata = metadata
+            
+            if topic == "smalltalk":
+                # Check if it's a personal question
+                q_lower = question.lower()
+                is_personal = any(kw in q_lower for kw in ["bạn là ai", "tôi là ai", "bạn biết tôi", "who are you", "who am i", "what is your name", "tên bạn"])
+                
+                if is_personal:
+                    answer = (
+                        "Xin chào! 👋\n\n"
+                        "Mình không lưu thông tin cá nhân và cũng không nhận diện người dùng. "
+                        "Nhưng mình có thể giúp phân tích dữ liệu Olist.\n\n"
+                        "💡 **Bạn muốn xem:**\n"
+                        "  • **Doanh thu 3 tháng gần đây**\n"
+                        "  • **Top 10 sản phẩm bán chạy**\n\n"
+                        "Hoặc hỏi mình bất kỳ câu hỏi nào về dữ liệu!"
+                    )
+                else:
+                    answer = (
+                        "Chào bạn 👋\n\n"
+                        "Mình có thể giúp phân tích số liệu Olist. Bạn muốn xem:\n"
+                        "  • **Doanh thu 3 tháng gần đây**\n"
+                        "  • **Top 10 sản phẩm bán chạy**\n\n"
+                        "Hoặc hỏi mình bất kỳ câu hỏi nào về dữ liệu!"
+                    )
+            elif topic == "about_data":
+                answer = (
+                    "**📊 Dữ liệu TMĐT Brazil (Olist)**\n\n"
+                    "• **Quy mô**: ~100k orders, ~32k products, ~9k sellers\n"
+                    "• **Thời gian**: 2016-2018 (batch data, không realtime)\n"
+                    "• **Kiến trúc**: Bronze → Silver → Gold → Platinum (Medallion)\n"
+                    "• **Datamarts chính**:\n"
+                    "  - `dm_sales_monthly_category`: Doanh thu theo danh mục/tháng\n"
+                    "  - `dm_customer_lifecycle`: Phân tích cohort & retention\n"
+                    "  - `dm_seller_kpi`: KPI nhà bán (GMV, on-time rate, cancel rate)\n"
+                    "  - `dm_logistics_sla`: SLA giao hàng theo vùng\n"
+                    "  - `dm_payment_mix`: Tỷ trọng phương thức thanh toán\n"
+                    "  - `demand_forecast`: Dự báo nhu cầu (ML)\n\n"
+                    "💡 **Lưu ý**: Dữ liệu batch nên số liệu ổn định, không realtime."
+                )
+            elif topic == "about_project":
+                answer = (
+                    "**🏗️ Kiến trúc Lakehouse - Brazilian E-commerce Data**\n\n"
+                    "**🎨 UI Layer:**\n"
+                    "  • Streamlit Dashboard (http://localhost:8501)\n"
+                    "  • Metabase BI (http://localhost:3000)\n"
+                    "  • Dagster Dagit (http://localhost:3001)\n"
+                    "  • Chat Service API (http://localhost:8001)\n\n"
+                    "**⚙️ Processing Layer:**\n"
+                    "  • Trino (SQL query engine)\n"
+                    "  • Apache Spark (ETL processing)\n"
+                    "  • MLflow (ML model tracking)\n"
+                    "  • Chat Service (SQL generation + RAG)\n\n"
+                    "**💾 Storage Layer:**\n"
+                    "  • Delta Lake trên MinIO (S3-compatible)\n"
+                    "  • MySQL (Hive Metastore + Logging)\n"
+                    "  • Qdrant (Vector DB cho RAG)\n\n"
+                    "**🔒 Security:**\n"
+                    "  • Read-only SQL queries\n"
+                    "  • Schema whitelist (gold, platinum)\n"
+                    "  • Auto LIMIT & timeout\n"
+                    "  • RAG với citations\n\n"
+                    "💡 **Tech Stack**: Python, Docker, Trino, Spark, Delta Lake, MLflow"
+                )
+            else:
+                answer = "Xin chào! Mình có thể giúp gì cho bạn?"
+            
+            # Get suggestions for non-SQL responses
+            suggestions = suggestions_for_non_sql(topic)
+            
+            log_conversation(session_id, "assistant", answer)
+            
+            return AskResponse(
+                session_id=session_id,
+                answer=answer,
+                sql=None,
+                rows_preview=None,
+                citations=None,
+                execution_time_ms=0,
+                suggestions=suggestions
+            )
+        
+        # 1b. HELP MODE - return suggestions instead of error
         if sql_query == "":
             examples = get_example_questions()
             answer_parts = [
@@ -546,41 +879,92 @@ def ask(request: AskRequest):
                 execution_time_ms=0
             )
         
-        # 1b. SQL generated - execute it
-        if sql_query:
+        # 1c. SQL generated - execute it
+        # Only execute if sql_query is a valid SQL string (not NO_SQL, not "", not None)
+        if sql_query and sql_query != NO_SQL and sql_query != "":
             try:
-                rows, exec_time = run_sql(sql_query)
+                # Parse source schema from SQL
+                source_schema = _parse_schema_from_sql(sql_query)
+                
+                rows, exec_time = run_sql(sql_query, check_empty=False)
                 total_execution_time += exec_time
+                
+                # Auto-enrich with product info if product_id present
+                rows = enrich_with_product_info(rows)
+                
                 rows_preview = rows[:50]  # Preview first 50 rows
+                
+                # Check for empty result and raise GuardError
+                if len(rows) == 0:
+                    raise GuardError(GuardCode.NO_DATA, "Query returned 0 rows")
                 
                 # Log SQL execution
                 log_sql_execution(session_id, sql_query, len(rows), exec_time)
                 
+            except GuardError as e:
+                # Handle guard errors with user-friendly messages and suggestions
+                guard_code = e.code
+                skill_meta = skill_metadata if skill_metadata else {}
+                
+                # Get message and suggestions based on error code
+                error_msg, error_suggestions = message_and_suggestions(guard_code, skill_meta, question)
+                
+                # Store suggestions for later use
+                suggestions = error_suggestions
+                
+                # Log the error
+                log_sql_execution(session_id, sql_query, 0, 0, str(e.detail))
+                
             except HTTPException as e:
+                # Fallback for HTTPException (should not happen with new code)
                 error_msg = f"Lỗi SQL: {e.detail}"
+                guard_code = GuardCode.AMBIGUOUS_INTENT
+                suggestions = ["Doanh thu 3 tháng gần đây", "Top 10 sản phẩm bán chạy", "Phương thức thanh toán phổ biến"]
                 log_sql_execution(session_id, sql_query, 0, 0, str(e.detail))
             except Exception as e:
+                # Fallback for other exceptions
                 error_msg = f"Lỗi không xác định: {str(e)}"
+                guard_code = GuardCode.AMBIGUOUS_INTENT
+                suggestions = ["Doanh thu 3 tháng gần đây", "Top 10 sản phẩm bán chạy", "Phương thức thanh toán phổ biến"]
                 log_sql_execution(session_id, sql_query, 0, 0, str(e))
         
-        # 1c. No SQL generated - suggest examples
+        # 1d. No SQL generated - suggest examples
+        elif not sql_query or sql_query is None:
+            # Check if this is an ambiguous intent (user wants SQL but we couldn't generate)
+            # This could be due to unclear question
+            guard_code = GuardCode.AMBIGUOUS_INTENT
+            error_msg, suggestions = message_and_suggestions(guard_code, skill_metadata, question)
+    
+    # 2. RAG search (always run for context when we have SQL or need error handling)
+    # Note: We already returned early for NO_SQL and HELP modes above
+    if sql_query != NO_SQL and sql_query != "":
+        citations = rag_search(question, k=4)
+    else:
+        citations = []
+    
+    # 3. Generate suggestions if not already set
+    if suggestions is None:
+        if guard_code:
+            # Use guard code to generate suggestions
+            suggestions = suggestions_for(skill_metadata, rows_preview, guard_code, question)
+        elif rows_preview and len(rows_preview) > 0:
+            # Use skill metadata and rows to generate suggestions
+            suggestions = suggestions_for(skill_metadata, rows_preview, None, question)
         else:
-            examples = get_example_questions()
-            error_msg = "Mình chưa sinh được SQL an toàn cho câu hỏi này.\n\n💡 Bạn thử một trong các câu hỏi sau:\n"
-            for i, example in enumerate(examples[:5], 1):
-                error_msg += f"  {i}. {example}\n"
+            # Default suggestions
+            suggestions = ["Doanh thu 3 tháng gần đây", "Top 10 sản phẩm bán chạy", "Phương thức thanh toán phổ biến"]
     
-    # 2. RAG search (always run for context)
-    citations = rag_search(question, k=4)
-    
-    # 3. Format answer with optional Gemini summarization
+    # 4. Format answer with header, summary, and suggestions
+    # Note: We already returned early for NO_SQL and HELP modes above
     answer = format_answer(
         question=question,
-        sql_query=sql_query,
+        sql_query=sql_query if sql_query and sql_query != NO_SQL and sql_query != "" else None,
         rows_preview=rows_preview,
         citations=citations,
         execution_time_ms=total_execution_time,
-        error=error_msg
+        error=error_msg,
+        source_schema=source_schema,
+        suggestions=None  # Suggestions are returned separately in AskResponse
     )
     
     # Log assistant response
@@ -589,10 +973,11 @@ def ask(request: AskRequest):
     return AskResponse(
         session_id=session_id,
         answer=answer,
-        sql=sql_query,
+        sql=sql_query if sql_query and sql_query != NO_SQL and sql_query != "" else None,
         rows_preview=rows_preview,
         citations=citations,
-        execution_time_ms=total_execution_time
+        execution_time_ms=total_execution_time,
+        suggestions=suggestions
     )
 
 

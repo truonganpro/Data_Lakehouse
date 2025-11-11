@@ -27,6 +27,7 @@ myenv/
 
 # Environment variables
 .env
+.env.docker
 *.env.local
 *.env.*.local
 
@@ -42,6 +43,7 @@ qdrant_data/
 minio/
 dagster_home/storage/
 dagster_home/logs/
+dagster_home/compute_logs/
 
 # Notebooks
 .ipynb_checkpoints/

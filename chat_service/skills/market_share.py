@@ -36,8 +36,8 @@ class MarketShareSkill(BaseSkill):
                 SELECT 
                     s.city_state AS region,
                     SUM(i.price + i.freight_value) AS revenue
-                FROM lakehouse.gold.factorderitem i
-                LEFT JOIN lakehouse.gold.dimseller s ON i.seller_id = s.seller_id
+                FROM lakehouse.gold.fact_order_item i
+                LEFT JOIN lakehouse.gold.dim_seller s ON i.seller_id = s.seller_id
                 WHERE i.full_date BETWEEN DATE '{start}' AND DATE '{end}'
                   AND i.full_date IS NOT NULL
                 GROUP BY 1
@@ -58,9 +58,9 @@ class MarketShareSkill(BaseSkill):
                 SELECT 
                     pc.product_category_name_english AS category,
                     SUM(i.price) AS revenue
-                FROM lakehouse.gold.factorderitem i
-                LEFT JOIN lakehouse.gold.dimproduct p ON i.product_id = p.product_id
-                LEFT JOIN lakehouse.gold.dimproductcategory pc 
+                FROM lakehouse.gold.fact_order_item i
+                LEFT JOIN lakehouse.gold.dim_product p ON i.product_id = p.product_id
+                LEFT JOIN lakehouse.gold.dim_product_category pc 
                   ON p.product_category_name = pc.product_category_name
                 WHERE i.full_date BETWEEN DATE '{start}' AND DATE '{end}'
                   AND i.full_date IS NOT NULL

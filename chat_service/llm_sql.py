@@ -9,21 +9,21 @@ import google.generativeai as genai
 
 READONLY_PAT = re.compile(r"^\s*(SELECT|WITH)\b", re.IGNORECASE)
 
-PROMPT_SQL = """Bạn là trợ lý dữ liệu giúp VIẾT SQL cho Trino. Chỉ trả về MỘT câu SQL hợp lệ, không giải thích.
+PROMPT_SQL = """Bạn là trợ lý dữ liệu giúp VIẾT SQL cho Trino. Chỉ trả về MỘT câu SQL hợp lệ,
 
 YÊU CẦU:
-- Chỉ dùng catalog lakehouse và schema gold|platinum (VD: lakehouse.gold.factorder).
+- Chỉ dùng catalog lakehouse và schema gold|platinum (VD: lakehouse.gold.fact_order).
 - Chỉ SELECT/WITH (read-only). Không được DELETE, DROP, INSERT, UPDATE, ALTER, CREATE, TRUNCATE.
 - Nếu không có GROUP BY thì PHẢI có LIMIT (tối đa 200).
 - Ưu tiên đọc từ platinum.* nếu câu hỏi tổng hợp theo tháng/danh mục; nếu cần chi tiết thì gold.*.
-- Cột ngày trong gold.factorder là full_date (DATE). Tháng dùng date_trunc('month', full_date).
+- Cột ngày trong gold.fact_order là full_date (DATE). Tháng dùng date_trunc('month', full_date).
 - Nếu câu hỏi không nói rõ thời gian, mặc định 3 tháng gần nhất: WHERE full_date >= date_add('month', -3, CURRENT_DATE)
 - Column names: customer_state, seller_state, primary_payment_type, payment_total, delivered_on_time, is_canceled
 - Luôn thêm WHERE full_date IS NOT NULL cho các bảng fact có cột full_date
 
 SCHEMA (Rút gọn):
 
-**gold.factorder** (Fact table chính)
+**gold.fact_order** (Fact table chính)
 - full_date (DATE): Ngày đặt hàng
 - order_id (STRING): ID đơn hàng
 - customer_id (STRING): ID khách hàng
@@ -37,7 +37,7 @@ SCHEMA (Rút gọn):
 - delivered_on_time (INT): 1 = đúng hạn, 0 = trễ
 - is_canceled (INT): 1 = đã hủy, 0 = không
 
-**gold.factorderitem** (Chi tiết items trong đơn)
+**gold.fact_order_item** (Chi tiết items trong đơn)
 - full_date (DATE): Ngày đặt hàng
 - order_id (STRING): ID đơn hàng
 - order_item_id (STRING): ID item
@@ -46,15 +46,15 @@ SCHEMA (Rút gọn):
 - price (DECIMAL): Giá sản phẩm
 - freight_value (DECIMAL): Phí vận chuyển
 
-**gold.dimseller** (Dimension người bán)
+**gold.dim_seller** (Dimension người bán)
 - seller_id (STRING): ID người bán (PK)
 - city_state (STRING): Thành phố + Bang
 
-**gold.dimproduct** (Dimension sản phẩm)
+**gold.dim_product** (Dimension sản phẩm)
 - product_id (STRING): ID sản phẩm (PK)
 - product_category_name (STRING): Danh mục (tiếng Bồ Đào Nha)
 
-**gold.dimproductcategory** (Dimension danh mục)
+**gold.dim_product_category** (Dimension danh mục)
 - product_category_name (STRING): Tên danh mục (tiếng Bồ Đào Nha) (PK)
 - product_category_name_english (STRING): Tên danh mục (tiếng Anh)
 
@@ -74,7 +74,7 @@ SELECT
     date_trunc('month', full_date) AS month,
     SUM(payment_total) AS revenue,
     COUNT(DISTINCT order_id) AS orders
-FROM lakehouse.gold.factorder
+FROM lakehouse.gold.fact_order
 WHERE full_date >= date_add('month', -3, CURRENT_DATE)
     AND full_date IS NOT NULL
 GROUP BY 1
@@ -104,9 +104,9 @@ SELECT
     dpc.product_category_name_english,
     COUNT(DISTINCT foi.order_id) AS orders,
     SUM(foi.price) AS revenue
-FROM lakehouse.gold.factorderitem foi
-LEFT JOIN lakehouse.gold.dimproduct dp ON foi.product_id = dp.product_id
-LEFT JOIN lakehouse.gold.dimproductcategory dpc ON dp.product_category_name = dpc.product_category_name
+FROM lakehouse.gold.fact_order_item foi
+LEFT JOIN lakehouse.gold.dim_product dp ON foi.product_id = dp.product_id
+LEFT JOIN lakehouse.gold.dim_product_category dpc ON dp.product_category_name = dpc.product_category_name
 WHERE foi.full_date >= date_add('month', -6, CURRENT_DATE)
     AND foi.full_date IS NOT NULL
 GROUP BY 1, 2, 3

@@ -80,12 +80,14 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Quick CTA Buttons
-ctaA, ctaB, ctaC = st.columns([1,1,1])
+ctaA, ctaB, ctaC, ctaD = st.columns([1,1,1,1])
 with ctaA:
     st.page_link("pages/1_📊_Query_Window.py", label="📊 Query Window", help="OLAP ROLLUP/GROUPING SETS", use_container_width=True)
 with ctaB:
     st.page_link("pages/2_💬_Chat.py", label="💬 Chat Analytics", help="Natural Language to SQL", use_container_width=True)
 with ctaC:
+    st.page_link("pages/4_👔_Executive_Dashboard.py", label="👔 Executive Dashboard", help="Báo cáo trực tiếp cho lãnh đạo", use_container_width=True)
+with ctaD:
     st.link_button("⚙️ Dagster", "http://localhost:3001", help="ETL Orchestration", use_container_width=True)
 
 st.markdown("<br>", unsafe_allow_html=True)
@@ -170,6 +172,17 @@ with tab_services:
         </div>
         """, unsafe_allow_html=True)
         st.page_link("pages/3_📈_Forecast_Explorer.py", label="Mở Forecast Explorer", icon="📈", use_container_width=True)
+        
+        st.markdown("")
+        
+        # Executive Dashboard
+        st.markdown("""
+        <div class='service-card'>
+        <div class='title'>👔 Executive Dashboard</div>
+        <div class='desc'>Báo cáo trực tiếp cho lãnh đạo với 10 dashboard và nhiều biểu đồ</div>
+        </div>
+        """, unsafe_allow_html=True)
+        st.page_link("pages/4_👔_Executive_Dashboard.py", label="Mở Executive Dashboard", icon="👔", use_container_width=True)
         
         st.markdown("")
         

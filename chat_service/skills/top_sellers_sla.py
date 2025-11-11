@@ -34,9 +34,9 @@ class TopSellersSLASkill(BaseSkill):
             ROUND(100.0 * SUM(CASE WHEN f.delivered_on_time = 1 THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2) AS ontime_rate_pct,
             COUNT(DISTINCT f.order_id) AS orders,
             SUM(f.sum_price + f.sum_freight) AS revenue
-        FROM lakehouse.gold.factorder f
-        JOIN lakehouse.gold.factorderitem i ON f.order_id = i.order_id
-        LEFT JOIN lakehouse.gold.dimseller s ON i.seller_id = s.seller_id
+        FROM lakehouse.gold.fact_order f
+        JOIN lakehouse.gold.fact_order_item i ON f.order_id = i.order_id
+        LEFT JOIN lakehouse.gold.dim_seller s ON i.seller_id = s.seller_id
         WHERE f.full_date BETWEEN DATE '{start}' AND DATE '{end}'
           AND f.full_date IS NOT NULL
         GROUP BY 1, 2

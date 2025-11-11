@@ -20,9 +20,22 @@ def parse_time_window(question: str) -> Dict[str, str]:
     q = question.lower()
     today = datetime.now().date()
     
-    # Default: last 3 months
-    default_start = today - timedelta(days=90)
+    # Default: last 12 months (or all available data if question has "gần đây" without number)
+    # For Olist data (2016-2018), we'll use data coverage from the dataset
+    default_start = today - timedelta(days=365)
     default_end = today
+    
+    # Special case: "gần đây" or "gần nhất" without number -> use last 12 months
+    # For Olist data (2016-2018), we'll use the latest available data
+    if any(kw in q for kw in ['gần đây', 'gần nhất', 'recent', 'latest']) and not re.search(r'\d+\s*(tháng|thang|tuần|tuan|ngày|ngay)', q):
+        # "gần đây" without number -> default to last 12 months
+        # But for Olist data, use 2017-2018 range (latest available)
+        # Check if question mentions Olist or Brazilian data, or if no year mentioned
+        if not re.search(r'20\d{2}', q):
+            # No year mentioned -> use Olist data range (2017-2018)
+            return {'start': '2017-01-01', 'end': '2018-12-31'}
+        default_start = today - timedelta(days=365)
+        return {'start': default_start.strftime('%Y-%m-%d'), 'end': default_end.strftime('%Y-%m-%d')}
     
     # N months ago/recent (3 tháng gần đây, 6 tháng qua, etc.)
     match = re.search(r'(\d+)\s*(tháng|thang)\s*(gần đây|gần nhất|qua|trước)', q)
@@ -47,7 +60,7 @@ def parse_time_window(question: str) -> Dict[str, str]:
     
     # Last month (tháng trước, tháng vừa rồi)
     if any(kw in q for kw in ['tháng trước', 'thang truoc', 'tháng vừa rồi']):
-        first_of_last_month = today.replace(day=1) - timedelta(days=1)
+        first_of_last_month = (today.replace(day=1) - timedelta(days=1))
         start = first_of_last_month.replace(day=1)
         end = first_of_last_month
         return {'start': start.strftime('%Y-%m-%d'), 'end': end.strftime('%Y-%m-%d')}
@@ -104,7 +117,12 @@ def parse_time_window(question: str) -> Dict[str, str]:
         start = datetime(today.year, 1, 1).date()
         return {'start': start.strftime('%Y-%m-%d'), 'end': today.strftime('%Y-%m-%d')}
     
-    # Default fallback
+    # Default fallback: For Olist data, use 2017-2018 range if no specific time mentioned
+    # This prevents queries from scanning empty date ranges
+    if not re.search(r'20\d{2}', q):
+        # No year mentioned -> use Olist data range (2017-2018, latest available)
+        return {'start': '2017-01-01', 'end': '2018-12-31'}
+    
     return {'start': default_start.strftime('%Y-%m-%d'), 'end': default_end.strftime('%Y-%m-%d')}
 
 

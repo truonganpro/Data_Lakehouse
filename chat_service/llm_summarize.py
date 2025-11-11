@@ -7,7 +7,7 @@ from typing import List, Dict, Optional
 import google.generativeai as genai
 
 
-PROMPT_SUMMARY = """Bạn là nhà phân tích dữ liệu chuyên nghiệp. Tóm tắt kết quả truy vấn NGẮN GỌN (2-5 câu) bằng tiếng Việt, có nêu số liệu nổi bật.
+PROMPT_SUMMARY = """Bạn là nhà phân tích dữ liệu chuyên nghiệp. Tóm tắt kết quả truy vấn NGẮN GỌN (2-4 câu) bằng tiếng Việt, có nêu số liệu nổi bật.
 
 ĐẦU VÀO:
 - Câu hỏi: {question}
@@ -17,11 +17,15 @@ PROMPT_SUMMARY = """Bạn là nhà phân tích dữ liệu chuyên nghiệp. Tó
 {citations_section}
 
 YÊU CẦU:
-- Nếu số liệu có top/bottom rõ ràng, hãy nêu cụ thể (ví dụ: "Top 3 là X, Y, Z với giá trị A, B, C").
-- Không bịa số. Chỉ dùng số liệu có trong bảng.
-- Không liệt kê quá dài. Tối đa 5 dòng.
-- Kết luận rõ ràng trong 1 câu cuối.
-- Nếu có xu hướng (tăng/giảm), hãy nêu.
+1. **Phạm vi**: Nêu 1 câu về phạm vi dữ liệu (tháng/quý, top-N nếu có).
+2. **Xu hướng**: 1-2 câu về xu hướng ↑↓ (tăng/giảm, cao nhất/thấp nhất).
+3. **Điểm đáng chú ý**: 1 câu nêu điều đáng chú ý (outlier, tăng/giảm mạnh, top/bottom).
+4. **Không bịa số**: Chỉ dùng số liệu có trong bảng.
+5. **Ngắn gọn**: Tối đa 4 câu, không liệt kê quá dài.
+
+Ví dụ:
+- "Doanh thu theo tháng từ 06-08/2018, giảm dần từ 1.23M → 987K. Tháng cao nhất là 07/2018 với 1.12M. Xu hướng giảm nhẹ nhưng ổn định."
+- "Top 10 sản phẩm bán chạy, GMV từ 50K → 200K. Sản phẩm số 1 có GMV 200K, chiếm 15% tổng. Phân bố đều, không có outlier."
 
 Trả lời NGẮN GỌN, CHÍNH XÁC, DỄ HIỂU.
 """
@@ -109,16 +113,43 @@ def summarize_with_gemini(
         return None
 
 
+def _parse_schema_from_sql(sql: str) -> str:
+    """
+    Parse schema name (gold/platinum) from SQL query
+    
+    Args:
+        sql: SQL query string
+        
+    Returns:
+        Schema name (gold or platinum), default to 'gold'
+    """
+    if not sql:
+        return "gold"
+    
+    sql_lower = sql.lower()
+    
+    # Check for platinum first (more specific)
+    if "platinum" in sql_lower:
+        return "platinum"
+    elif "gold" in sql_lower:
+        return "gold"
+    else:
+        # Default to gold
+        return "gold"
+
+
 def format_answer(
     question: str,
     sql_query: Optional[str],
     rows_preview: Optional[List[Dict]],
     citations: Optional[List[Dict]],
     execution_time_ms: int,
-    error: Optional[str] = None
+    error: Optional[str] = None,
+    source_schema: Optional[str] = None,
+    suggestions: Optional[List[str]] = None
 ) -> str:
     """
-    Format complete answer with optional Gemini summarization
+    Format complete answer with header, summary, and suggestions
     
     Args:
         question: Original question
@@ -127,6 +158,8 @@ def format_answer(
         citations: RAG citations
         execution_time_ms: Execution time
         error: Error message if any
+        source_schema: Source schema (gold/platinum), auto-parsed if None
+        suggestions: List of suggestion strings
         
     Returns:
         Formatted answer text
@@ -134,21 +167,23 @@ def format_answer(
     answer_parts = []
     
     if error:
-        answer_parts.append(f"❌ Lỗi: {error}")
-        
-        # Suggest examples
-        answer_parts.append("\n💡 Hãy thử các câu hỏi sau:")
-        answer_parts.append("  • Doanh thu theo tháng 3 tháng gần đây?")
-        answer_parts.append("  • Top 10 sản phẩm bán chạy nhất?")
-        answer_parts.append("  • Phương thức thanh toán nào phổ biến nhất?")
-        
+        # Error case: don't add header, just show error with suggestions
+        answer_parts.append(error)
         return "\n".join(answer_parts)
     
-    # Success case
-    if rows_preview:
-        answer_parts.append(f"✅ Đã thực thi SQL query thành công")
-        answer_parts.append(f"⏱️  Thời gian: {execution_time_ms}ms")
-        answer_parts.append(f"📊 Kết quả: {len(rows_preview)} dòng\n")
+    # Success case: Add header with data provenance
+    if sql_query and rows_preview:
+        # Parse schema if not provided
+        if not source_schema:
+            source_schema = _parse_schema_from_sql(sql_query)
+        
+        # Data freshness message (fixed for batch Olist data)
+        data_freshness = "Dữ liệu batch (2016-2018), không realtime"
+        
+        # Header with data provenance
+        header = f"🗂️ **Nguồn:** `lakehouse.{source_schema}` • ⏱️ **Thời gian chạy:** {execution_time_ms}ms • 📦 {data_freshness}"
+        answer_parts.append(header)
+        answer_parts.append("")  # Empty line
         
         # Try to get Gemini summary
         summary = summarize_with_gemini(question, rows_preview, citations)
@@ -156,20 +191,24 @@ def format_answer(
         if summary:
             answer_parts.append("📝 **Tóm tắt:**")
             answer_parts.append(summary)
+            answer_parts.append("")  # Empty line
         else:
-            # Fallback: show first few rows
-            if rows_preview and len(rows_preview) > 0:
-                answer_parts.append(f"💡 Ví dụ dòng đầu tiên:")
-                answer_parts.append(f"```json\n{rows_preview[0]}\n```")
+            # Fallback: brief info about results
+            answer_parts.append(f"📊 **Kết quả:** {len(rows_preview)} dòng")
+            answer_parts.append("")  # Empty line
     
-    # Add citations
+    # Add citations (if any)
     if citations and len(citations) > 0:
-        answer_parts.append(f"\n📚 Tài liệu tham khảo:")
-        for cite in citations[:4]:
+        answer_parts.append("📚 **Tài liệu tham khảo:**")
+        for cite in citations[:3]:  # Show top 3 citations
             answer_parts.append(
-                f"  - {cite.get('source', 'unknown')} "
+                f"  • {cite.get('source', 'unknown')} "
                 f"(độ liên quan: {cite.get('score', 0):.2f})"
             )
+        answer_parts.append("")  # Empty line
+    
+    # Note: suggestions are handled separately in AskResponse model
+    # They will be displayed as buttons in the UI
     
     return "\n".join(answer_parts)
 

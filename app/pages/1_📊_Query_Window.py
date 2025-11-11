@@ -1,4 +1,5 @@
 import os
+import re
 import streamlit as st
 import pandas as pd
 from datetime import date, datetime, timedelta
@@ -336,6 +337,308 @@ hr{border-color:var(--line);opacity:.4;margin:1rem 0}
 st.title("🧮 Cửa sổ truy vấn đa chiều")
 st.caption("Phân tích dữ liệu Brazilian E-commerce với Trino • OLAP ROLLUP/GROUPING SETS")
 
+# ====== Mode Selection ======
+mode = st.sidebar.radio("🔀 Chế độ", ["Trình dựng (GUI)", "SQL thủ công"], index=0)
+
+# ====== Manual SQL Mode ======
+if mode == "SQL thủ công":
+    st.subheader("🧩 SQL thủ công (SELECT-only)")
+    st.caption("Chỉ cho phép SELECT/WITH trên lakehouse.gold|platinum. Có thể dùng :start, :end, :month.")
+    
+    # Sample SQL template
+    sample_sql = """WITH base AS (
+  SELECT *
+  FROM lakehouse.gold.fact_order
+  WHERE CAST(full_date AS date) >= DATE :start
+    AND CAST(full_date AS date) <  DATE :end
+)
+SELECT 
+  date_trunc('month', full_date) AS month,
+  primary_payment_type,
+  SUM(payment_total) AS total_payment,
+  COUNT(*) AS order_count
+FROM base
+GROUP BY 1, 2
+ORDER BY 1, 3 DESC
+LIMIT 100
+"""
+    
+    sql_input = st.text_area(
+        "📝 SQL Query",
+        sample_sql,
+        height=260,
+        key="custom_sql",
+        help="Nhập câu lệnh SQL. Sử dụng :start, :end, :month làm placeholder cho tham số."
+    )
+    
+    # Quick parameters
+    st.markdown("**⚙️ Tham số nhanh**")
+    param_col1, param_col2, param_col3 = st.columns(3)
+    
+    with param_col1:
+        d_start = st.date_input(
+            "📅 Start",
+            value=COVER_MIN,
+            min_value=COVER_MIN,
+            max_value=COVER_MAX,
+            help="Ngày bắt đầu (dùng cho :start)"
+        )
+    
+    with param_col2:
+        d_end = st.date_input(
+            "📅 End (exclusive)",
+            value=COVER_MAX,
+            min_value=COVER_MIN,
+            max_value=COVER_MAX,
+            help="Ngày kết thúc (exclusive, dùng cho :end)"
+        )
+    
+    with param_col3:
+        # Default to current month or last month of data
+        default_month = COVER_MAX.strftime("%Y-%m")
+        month_input = st.text_input(
+            "📆 Month (YYYY-MM)",
+            value=default_month,
+            help="Tháng (dùng cho :month)"
+        )
+    
+    # Options
+    auto_limit = st.checkbox(
+        "✅ Tự động thêm LIMIT 10000 nếu thiếu",
+        value=True,
+        help="Tự động thêm LIMIT 10000 vào cuối câu lệnh SQL nếu chưa có"
+    )
+    
+    show_explain = st.checkbox(
+        "🔍 Hiện kế hoạch (EXPLAIN) trước khi chạy",
+        value=False,
+        help="Hiển thị execution plan trước khi chạy truy vấn"
+    )
+    
+    # ====== Safety Checks ======
+    sql = sql_input.strip()
+    
+    # Check if SQL starts with SELECT or WITH
+    if not re.match(r"^\s*(WITH|SELECT)\b", sql, re.IGNORECASE):
+        st.info("ℹ️ Chỉ hỗ trợ SELECT/WITH. Vui lòng bắt đầu câu lệnh bằng SELECT hoặc WITH.")
+        st.stop()
+    
+    # Block dangerous keywords (DDL/DML)
+    danger_pattern = re.compile(
+        r"\b(ALTER|DROP|TRUNCATE|INSERT|UPDATE|DELETE|CREATE|RENAME|CALL|GRANT|REVOKE|MERGE|EXEC|EXECUTE)\b",
+        re.IGNORECASE
+    )
+    if danger_pattern.search(sql):
+        st.error("❌ Phát hiện từ khóa không được phép (DDL/DML). Chỉ SELECT/WITH được phép.")
+        st.stop()
+    
+    # Require valid catalog/schema (warning only, not blocking)
+    schema_match = re.search(r"\blakehouse\.(gold|platinum)\.", sql, re.IGNORECASE)
+    if not schema_match:
+        st.warning("⚠️ Hãy truy vấn trong lakehouse.gold hoặc lakehouse.platinum (ví dụ: lakehouse.gold.fact_order).")
+        # Don't stop, just warn - user might be using subqueries or views
+    else:
+        # Extract schema from match for later use
+        detected_schema = schema_match.group(1).lower()
+    
+    # Check if placeholders exist in original SQL
+    has_placeholders = ":start" in sql_input or ":end" in sql_input or ":month" in sql_input
+    
+    # Replace placeholders safely (only if they exist in SQL)
+    if ":start" in sql:
+        sql = sql.replace(":start", f"'{d_start.isoformat()}'")
+    if ":end" in sql:
+        sql = sql.replace(":end", f"'{d_end.isoformat()}'")
+    if ":month" in sql:
+        sql = sql.replace(":month", f"'{month_input}'")
+    
+    # Check if LIMIT exists
+    has_limit = bool(re.search(r"\bLIMIT\s+\d+\b", sql, re.IGNORECASE))
+    
+    # Add LIMIT if missing and auto_limit is enabled
+    limit_added = False
+    if auto_limit and not has_limit:
+        sql += "\nLIMIT 10000"
+        limit_added = True
+    
+    # Display final SQL (always show if there were changes)
+    if limit_added or has_placeholders:
+        st.markdown("**📋 SQL đã xử lý:**")
+        st.code(sql, language="sql")
+        if limit_added:
+            st.info("ℹ️ Đã tự động thêm LIMIT 10000 vào câu lệnh SQL.")
+    else:
+        # Show a collapsible section for SQL preview
+        with st.expander("📋 Xem SQL đã xử lý", expanded=False):
+            st.code(sql, language="sql")
+    
+    # EXPLAIN button (optional)
+    if show_explain:
+        if st.button("🔍 EXPLAIN", use_container_width=True):
+            try:
+                explain_sql = f"EXPLAIN {sql}"
+                with st.spinner("⏳ Đang phân tích execution plan..."):
+                    df_explain = run_query(explain_sql, DEFAULT_SCHEMA)
+                
+                if not df_explain.empty:
+                    st.success("✅ Execution Plan:")
+                    st.dataframe(df_explain, use_container_width=True, height=280)
+                else:
+                    st.warning("⚠️ Không thể lấy execution plan.")
+            except Exception as e:
+                st.error(f"❌ Lỗi EXPLAIN: {e}")
+    
+    # Run SQL button
+    if st.button("▶️ Run SQL", type="primary", use_container_width=True):
+        try:
+            with st.spinner("⏳ Đang chạy truy vấn..."):
+                # Determine schema from SQL (default to gold)
+                # Check for platinum first, then gold, then default to gold
+                if re.search(r"\blakehouse\.platinum\.", sql, re.IGNORECASE):
+                    query_schema = "platinum"
+                elif re.search(r"\blakehouse\.gold\.", sql, re.IGNORECASE):
+                    query_schema = "gold"
+                else:
+                    # If no schema detected, default to gold but show warning
+                    query_schema = "gold"
+                    st.warning("⚠️ Không phát hiện schema trong SQL. Đang dùng schema mặc định: gold")
+                
+                df = run_query(sql, query_schema)
+            
+            if df.empty:
+                st.warning("📭 Không có dữ liệu trả về.")
+                st.stop()
+            
+            # Display results
+            st.success(f"✅ Trả về {len(df):,} dòng")
+            st.subheader("📊 Kết quả")
+            
+            # Display dataframe
+            st.dataframe(df, use_container_width=True, height=500)
+            
+            # Summary statistics
+            with st.expander("📈 Thống kê tổng hợp"):
+                st.write("**Tổng số dòng:**", f"{len(df):,}")
+                st.write("**Số cột:**", len(df.columns))
+                st.write("**Các cột:**", ", ".join(df.columns))
+                
+                # Show data types
+                st.write("**Kiểu dữ liệu:**")
+                for col in df.columns:
+                    dtype = str(df[col].dtype)
+                    st.write(f"  - `{col}`: {dtype}")
+            
+            # Export options
+            st.subheader("💾 Xuất dữ liệu")
+            export_col1, export_col2 = st.columns(2)
+            
+            with export_col1:
+                # CSV export
+                csv = df.to_csv(index=False).encode("utf-8")
+                st.download_button(
+                    "⬇️ Tải CSV",
+                    csv,
+                    f"custom_sql_result_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    "text/csv",
+                    use_container_width=True
+                )
+            
+            with export_col2:
+                # Excel export
+                try:
+                    import io
+                    bio = io.BytesIO()
+                    with pd.ExcelWriter(bio, engine='openpyxl') as writer:
+                        df.to_excel(writer, index=False, sheet_name='Query Result')
+                    st.download_button(
+                        "⬇️ Tải Excel",
+                        bio.getvalue(),
+                        f"custom_sql_result_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True
+                    )
+                except Exception as e:
+                    st.error(f"❌ Lỗi export Excel: {e}")
+        
+        except Exception as e:
+            st.error(f"❌ Lỗi truy vấn: {e}")
+            st.code(sql, language="sql")
+            # Show helpful error message
+            error_str = str(e)
+            if "TABLE_NOT_FOUND" in error_str or "does not exist" in error_str:
+                st.info("💡 Gợi ý: Kiểm tra tên bảng và schema. Ví dụ: `lakehouse.gold.fact_order`")
+            elif "SYNTAX_ERROR" in error_str or "syntax" in error_str.lower():
+                st.info("💡 Gợi ý: Kiểm tra cú pháp SQL. Đảm bảo dùng cú pháp Trino/Presto SQL.")
+    
+    # Help section for manual SQL
+    with st.expander("ℹ️ Hướng dẫn SQL thủ công", expanded=False):
+        st.markdown("""
+        ### 📝 Cách sử dụng:
+        
+        1. **Nhập SQL**: Gõ câu lệnh SELECT/WITH trong khung text area
+        2. **Tham số**: Sử dụng `:start`, `:end`, `:month` làm placeholder
+        3. **Chạy**: Nhấn nút "Run SQL" để thực thi
+        
+        ### 🔒 Rào chắn an toàn:
+        - ✅ Chỉ cho phép SELECT/WITH
+        - ✅ Chặn DDL/DML (DROP, INSERT, UPDATE, DELETE, etc.)
+        - ✅ Bắt buộc tham chiếu trong `lakehouse.gold` hoặc `lakehouse.platinum`
+        - ✅ Tự động thêm LIMIT 10000 nếu thiếu
+        
+        ### 💡 Ví dụ SQL:
+        
+        **Ví dụ 1: Truy vấn đơn giản**
+        ```sql
+        SELECT *
+        FROM lakehouse.gold.fact_order
+        WHERE CAST(full_date AS date) >= DATE :start
+          AND CAST(full_date AS date) <  DATE :end
+        LIMIT 100
+        ```
+        
+        **Ví dụ 2: Với CTE (WITH)**
+        ```sql
+        WITH monthly_sales AS (
+          SELECT 
+            date_trunc('month', full_date) AS month,
+            SUM(payment_total) AS total
+          FROM lakehouse.gold.fact_order
+          WHERE CAST(full_date AS date) >= DATE :start
+            AND CAST(full_date AS date) <  DATE :end
+          GROUP BY 1
+        )
+        SELECT * FROM monthly_sales ORDER BY month
+        ```
+        
+        **Ví dụ 3: JOIN với dimension tables**
+        ```sql
+        SELECT 
+          o.full_date,
+          p.product_category_name_english AS category,
+          SUM(oi.price) AS revenue
+        FROM lakehouse.gold.fact_order_item oi
+        JOIN lakehouse.gold.fact_order o ON oi.order_id = o.order_id
+        JOIN lakehouse.gold.dim_product p ON oi.product_id = p.product_id
+        WHERE CAST(o.full_date AS date) >= DATE :start
+          AND CAST(o.full_date AS date) <  DATE :end
+        GROUP BY 1, 2
+        ORDER BY 1, 3 DESC
+        ```
+        
+        ### ⚠️ Lưu ý:
+        - **Half-open interval**: Dùng `>= :start AND < :end` để tránh lỗi biên
+        - **Year-month columns**: Nếu dùng `year_month` (VARCHAR), parse sang DATE:
+          ```sql
+          WHERE date_parse(year_month || '-01', '%Y-%m-%d') >= DATE :start
+            AND date_parse(year_month || '-01', '%Y-%m-%d') <  DATE :end
+          ```
+        - **Performance**: Giới hạn số dòng với LIMIT để tránh query quá nặng
+        - **EXPLAIN**: Dùng checkbox "Hiện kế hoạch" để xem execution plan trước khi chạy
+        """)
+    
+    st.stop()  # Stop here, don't run GUI mode below
+
+# ====== GUI Mode (Original Query Builder) ======
 # ====== Schema & Table Selection ======
 col_meta1, col_meta2 = st.columns(2)
 

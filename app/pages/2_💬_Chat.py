@@ -73,6 +73,10 @@ if "last_citations" not in st.session_state:
 if "execution_time" not in st.session_state:
     st.session_state.execution_time = None
 
+if "last_suggestions" not in st.session_state:
+    st.session_state.last_suggestions = None
+
+
 
 # ============================================================================
 # Helper Functions
@@ -94,6 +98,58 @@ def get_example_questions():
         "Phân bố đơn hàng theo vùng miền?",
         "Phương thức thanh toán nào phổ biến nhất?",
     ]
+
+
+def render_prompt_chip(label: str, prompt: str, key: str):
+    """Render a prompt chip button - auto-submit when clicked"""
+    if st.button(label, key=key, use_container_width=True):
+        st.session_state.selected_example = prompt
+        st.rerun()
+
+
+def get_prompt_chips():
+    """Define all prompt chips organized by category"""
+    return {
+        "Tổng quan & Tăng trưởng": [
+            ("Tổng quan theo tháng", "Tổng quan doanh thu 2017-01-01 → 2018-01-01: GMV, Orders, Units, AOV theo tháng."),
+            ("MoM/YoY 2017", "Tính MoM và YoY GMV theo tháng giai đoạn 2017-01-01 → 2018-01-01."),
+            ("Top danh mục (Pareto)", "Top 15 danh mục đóng góp GMV giai đoạn 2017-01-01 → 2018-01-01 (bảng + Pareto%)."),
+        ],
+        "Danh mục & Sản phẩm": [
+            ("Top SP theo GMV (kèm info)", "Top 20 sản phẩm GMV trong danh mục computers năm 2017, kèm thông tin sản phẩm."),
+            ("Top SP theo số đơn", "Top 20 sản phẩm theo số đơn năm 2017, kèm category_en & kích thước."),
+            ("Heatmap Category×Month", "GMV theo danh mục × tháng trong năm 2017 (heatmap)."),
+            ("AOV theo danh mục", "Giá trị trung bình đơn hàng (AOV) theo danh mục năm 2017."),
+        ],
+        "Địa lý (Geography)": [
+            ("GMV theo bang", "GMV theo bang (state) năm 2017, sắp xếp giảm dần, hiển thị Top 10."),
+            ("GMV theo thành phố", "GMV theo thành phố (city) trong bang SP năm 2017, Top 10."),
+            ("Tăng trưởng theo bang", "Tốc độ tăng trưởng GMV theo bang 2017-01-01 → 2018-01-01."),
+        ],
+        "Người bán (Seller)": [
+            ("Top seller theo GMV", "Top 10 seller theo GMV năm 2017: GMV, Orders, Units, on_time_rate, cancel_rate, avg_review_score."),
+            ("Seller có vấn đề SLA", "Seller có on_time_rate < 90% nhưng GMV > 20000 trong năm 2017."),
+            ("Trend review score", "Trend review_score theo tháng của seller trong năm 2017."),
+        ],
+        "Vận hành (SLA/Delivery)": [
+            ("On-time rate theo tháng", "On-time rate và Avg delivery days theo tháng năm 2017 (exclude canceled)."),
+            ("Top bang delivery chậm", "Top 10 bang có Avg delivery days cao nhất trong năm 2017."),
+            ("SLA theo danh mục", "Danh mục computers: on_time_rate theo tháng năm 2017."),
+        ],
+        "Thanh toán (Finance)": [
+            ("Payment mix theo tháng", "Payment mix theo tháng năm 2017 (tỷ trọng theo payment_value)."),
+            ("Tỷ lệ trả góp", "Tỷ lệ dùng installments theo tháng năm 2017."),
+        ],
+        "Khách hàng (Cohort/Retention)": [
+            ("Cohort heatmap", "Cohort từ 2017-01 → 2017-06: retention heatmap (0–12 tháng)."),
+            ("Retention sau k tháng", "Retention sau 3 tháng của cohort 2017-01 là bao nhiêu? Kèm bảng chi tiết."),
+            ("Orders theo cohort", "Orders theo thời gian của mỗi cohort (line chart) giai đoạn 2017-01-01 → 2018-01-01."),
+        ],
+        "Dự báo (Forecast)": [
+            ("Dự báo GMV 28 ngày", "Dự báo GMV 28 ngày tới cho computers (actual vs forecast + dải tin cậy)."),
+            ("Sai số dự báo", "Sai số dự báo MAE/MAPE theo tháng trong năm 2017."),
+        ],
+    }
 
 
 def send_question(question: str):
@@ -130,6 +186,15 @@ def send_question(question: str):
 st.title("💬 Chat với Dữ liệu")
 st.caption("Hỏi đáp dữ liệu Brazilian E-commerce bằng ngôn ngữ tự nhiên (SQL + RAG)")
 
+# Info banner
+st.info("""
+⚙️ Truy vấn **read-only** trên schema **gold/platinum**; mặc định áp **LIMIT** và **timeout**. 
+Thời gian lọc dùng chuẩn half-open `[start, end_next)` để tránh lỗi biên. `category_en` & `state` là cột chuẩn hoá.
+
+🧩 Khi kết quả có **product_id**, hệ thống **tự enrich** thông tin sản phẩm (category_en, kích thước/khối lượng). 
+Gõ 'kèm thông tin sản phẩm' để buộc join đầy đủ.
+""")
+
 # Sidebar - Examples & Info
 with st.sidebar:
     st.header("📚 Câu hỏi mẫu")
@@ -164,6 +229,21 @@ with st.sidebar:
         st.session_state.last_citations = None
         st.session_state.execution_time = None
         st.rerun()
+
+# Prompt Chips Section
+st.markdown("### 🧠 Gợi ý câu hỏi nhanh")
+prompt_chips = get_prompt_chips()
+
+# Render chips in expanders
+for category, chips in prompt_chips.items():
+    with st.expander(category, expanded=(category == "Tổng quan & Tăng trưởng")):
+        cols = st.columns(3)
+        for i, (label, prompt) in enumerate(chips):
+            col_idx = i % 3
+            with cols[col_idx]:
+                render_prompt_chip(label, prompt, f"chip_{category}_{i}")
+
+st.caption("💡 Click vào chip để tự động điền prompt vào ô chat. Bạn có thể chỉnh sửa các tham số (năm, Top-N, category...) trước khi gửi.")
 
 # Main chat interface
 st.divider()
@@ -215,7 +295,7 @@ for role, message in st.session_state.chat_history:
 # Chat input
 question = st.chat_input("Nhập câu hỏi của bạn...", key="chat_input")
 
-# Handle example selection
+# Handle example selection (from sidebar or prompt chips)
 if "selected_example" in st.session_state:
     question = st.session_state.selected_example
     del st.session_state.selected_example
@@ -239,6 +319,7 @@ if question:
         st.session_state.last_preview = result.get("rows_preview")
         st.session_state.last_citations = result.get("citations")
         st.session_state.execution_time = result.get("execution_time_ms")
+        st.session_state.last_suggestions = result.get("suggestions")  # Store suggestions
         
         # Add assistant response to history
         answer = result.get("answer", "Không có câu trả lời")
@@ -247,6 +328,26 @@ if question:
         # Display assistant message
         with st.chat_message("assistant"):
             st.markdown(answer)
+            
+            # Display suggestions as clickable buttons
+            suggestions = result.get("suggestions")
+            if suggestions and len(suggestions) > 0:
+                st.markdown("---")
+                st.markdown("**💡 Gợi ý câu hỏi tiếp theo:**")
+                
+                # Display suggestions in columns
+                cols = st.columns(min(len(suggestions), 3))
+                for i, sugg in enumerate(suggestions[:3]):
+                    col_idx = i % 3
+                    with cols[col_idx]:
+                        if st.button(
+                            sugg, 
+                            key=f"sugg_{hash(question)}_{i}",
+                            use_container_width=True
+                        ):
+                            # Set selected suggestion as next question
+                            st.session_state.selected_example = sugg
+                            st.rerun()
 
 # Display SQL & Results
 if st.session_state.last_sql or st.session_state.last_preview or st.session_state.last_citations:
@@ -279,6 +380,18 @@ if st.session_state.last_sql or st.session_state.last_preview or st.session_stat
     if st.session_state.last_preview:
         with st.expander("📊 Kết quả (Preview 50 dòng đầu)", expanded=True):
             df = pd.DataFrame(st.session_state.last_preview)
+            
+            # Reorder columns if product_id present (prioritize product info)
+            if "product_id" in df.columns:
+                cols = df.columns.tolist()
+                priority = [c for c in ["product_id", "category_en", "orders", "units", "gmv", "aov", 
+                                       "product_weight_g", "product_length_cm", "product_height_cm", "product_width_cm"] 
+                           if c in cols]
+                others = [c for c in cols if c not in priority]
+                df = df[priority + others]
+                
+                # Show info message about product enrichment
+                st.info("💡 Đã tự động bổ sung **thông tin sản phẩm** từ `gold.dim_product` và `gold.dim_product_category` (cột: `category_en`, kích thước/khối lượng).")
             
             # Display dataframe
             st.dataframe(

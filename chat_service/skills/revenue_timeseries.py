@@ -32,20 +32,47 @@ class RevenueTimeseriesSkill(BaseSkill):
         end = params['time_window']['end']
         grain = params['time_grain']
         
-        sql = f"""
-        SELECT 
-            date_trunc('{grain}', f.full_date) AS dt,
-            SUM(f.sum_price + f.sum_freight) AS gmv,
-            COUNT(DISTINCT f.order_id) AS orders,
-            COUNT(DISTINCT f.customer_id) AS customers,
-            ROUND(SUM(f.sum_price + f.sum_freight) / NULLIF(COUNT(DISTINCT f.order_id), 0), 2) AS aov
-        FROM lakehouse.gold.factorder f
-        WHERE f.full_date BETWEEN DATE '{start}' AND DATE '{end}'
-          AND f.full_date IS NOT NULL
-        GROUP BY 1
-        ORDER BY 1 DESC
-        LIMIT 200
-        """
+        # For monthly queries, prefer platinum datamart (pre-aggregated, faster)
+        if grain == 'month':
+            # Use platinum.dm_sales_monthly_category for monthly aggregation
+            # Parse year_month from start/end dates
+            start_year_month = start[:7]  # YYYY-MM
+            end_year_month = end[:7]      # YYYY-MM
+            
+            sql = f"""
+            SELECT 
+                year_month AS dt,
+                SUM(gmv) AS gmv,
+                SUM(orders) AS orders,
+                SUM(units) AS units,
+                ROUND(SUM(gmv) / NULLIF(SUM(orders), 0), 2) AS aov
+            FROM lakehouse.platinum.dm_sales_monthly_category
+            WHERE year_month >= '{start_year_month}'
+              AND year_month <= '{end_year_month}'
+            GROUP BY 1
+            ORDER BY 1 DESC
+            LIMIT 200
+            """
+        else:
+            # For day/week queries, use gold.fact_order
+            # Clamp dates to Olist data range (2016-09-04 to 2018-10-17)
+            start_clamped = max(start, '2016-09-04')
+            end_clamped = min(end, '2018-10-17')
+            
+            sql = f"""
+            SELECT 
+                date_trunc('{grain}', f.full_date) AS dt,
+                SUM(f.sum_price + f.sum_freight) AS gmv,
+                COUNT(DISTINCT f.order_id) AS orders,
+                COUNT(DISTINCT f.customer_id) AS customers,
+                ROUND(SUM(f.sum_price + f.sum_freight) / NULLIF(COUNT(DISTINCT f.order_id), 0), 2) AS aov
+            FROM lakehouse.gold.fact_order f
+            WHERE f.full_date BETWEEN DATE '{start_clamped}' AND DATE '{end_clamped}'
+              AND f.full_date IS NOT NULL
+            GROUP BY 1
+            ORDER BY 1 DESC
+            LIMIT 200
+            """
         
         return sql.strip()
 

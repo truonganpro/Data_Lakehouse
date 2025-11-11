@@ -39,7 +39,7 @@ class OntimeRateSkill(BaseSkill):
             ROUND(100.0 * SUM(CASE WHEN f.delivered_on_time = 0 THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2) AS late_rate_pct,
             ROUND(100.0 * SUM(CASE WHEN f.is_canceled = 1 THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2) AS cancel_rate_pct,
             COUNT(*) AS total_orders
-        FROM lakehouse.gold.factorder f
+        FROM lakehouse.gold.fact_order f
         WHERE f.full_date BETWEEN DATE '{start}' AND DATE '{end}'
           AND f.full_date IS NOT NULL
         GROUP BY 1

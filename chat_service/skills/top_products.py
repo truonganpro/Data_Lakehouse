@@ -34,8 +34,8 @@ class TopProductsSkill(BaseSkill):
         
         # Check if user wants by units or revenue
         q = question.lower()
-        metric = 'revenue' if 'doanh thu' in q or 'revenue' in q else 'units'
-        order_by = '3' if metric == 'revenue' else '4'  # Column position
+        metric = 'revenue' if 'doanh thu' in q or 'revenue' in q or 'gmv' in q else 'units'
+        order_by = 'gmv' if metric == 'revenue' else 'units'
         
         # Check for category filter
         category_filter = ""
@@ -45,20 +45,35 @@ class TopProductsSkill(BaseSkill):
             category_filter = f"AND pc.product_category_name_english IN ('{cat_list}')"
         
         sql = f"""
-        SELECT 
-            pc.product_category_name_english AS category,
-            i.product_id,
-            SUM(i.price) AS revenue,
+        WITH item AS (
+          SELECT
+            oi.product_id,
+            SUM(oi.price + oi.freight_value) AS gmv,
             COUNT(*) AS units,
-            COUNT(DISTINCT i.order_id) AS orders
-        FROM lakehouse.gold.factorderitem i
-        LEFT JOIN lakehouse.gold.dimproduct p ON i.product_id = p.product_id
-        LEFT JOIN lakehouse.gold.dimproductcategory pc 
-          ON p.product_category_name = pc.product_category_name
-        WHERE i.full_date BETWEEN DATE '{start}' AND DATE '{end}'
-          AND i.full_date IS NOT NULL
+            COUNT(DISTINCT oi.order_id) AS orders
+          FROM lakehouse.gold.fact_order_item oi
+          WHERE oi.full_date >= DATE '{start}' AND oi.full_date < DATE '{end}'
+            AND oi.full_date IS NOT NULL
+          GROUP BY oi.product_id
+        )
+        SELECT
+          i.product_id,
+          COALESCE(pc.product_category_name_english, 'unknown') AS category_en,
+          p.product_weight_g,
+          p.product_length_cm,
+          p.product_height_cm,
+          p.product_width_cm,
+          i.orders,
+          i.units,
+          ROUND(i.gmv, 2) AS gmv,
+          ROUND(i.gmv / NULLIF(i.orders, 0), 2) AS aov
+        FROM item i
+        JOIN lakehouse.gold.dim_product p
+          ON p.product_id = i.product_id
+        LEFT JOIN lakehouse.gold.dim_product_category pc
+          ON pc.product_category_name = p.product_category_name
+        WHERE 1=1
           {category_filter}
-        GROUP BY 1, 2
         ORDER BY {order_by} DESC
         LIMIT {topn}
         """
