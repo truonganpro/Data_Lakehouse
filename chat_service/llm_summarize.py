@@ -3,6 +3,7 @@
 LLM-based result summarization module using Google Gemini
 """
 import os
+import re
 from typing import List, Dict, Optional
 import google.generativeai as genai
 
@@ -113,6 +114,110 @@ def summarize_with_gemini(
         return None
 
 
+def _explain_sql_and_lineage(sql: str, source_schema: str, rows_preview: Optional[List[Dict]]) -> str:
+    """
+    Explain SQL calculation and data lineage
+    
+    Args:
+        sql: SQL query string
+        source_schema: Source schema (gold/platinum)
+        rows_preview: Query results (to infer measures)
+        
+    Returns:
+        Explanation text or empty string
+    """
+    if not sql:
+        return ""
+    
+    sql_lower = sql.lower()
+    explain_parts = []
+    
+    # Detect main table
+    main_table = None
+    if "from" in sql_lower:
+        # Simple extraction: FROM table_name or FROM schema.table_name
+        from_match = re.search(r'from\s+[\w.]+\.([\w]+)', sql_lower)
+        if from_match:
+            main_table = from_match.group(1)
+        else:
+            from_match = re.search(r'from\s+([\w]+)', sql_lower)
+            if from_match:
+                main_table = from_match.group(1)
+    
+    # Detect measures (SUM, COUNT, AVG, etc.)
+    measures = []
+    if "sum(" in sql_lower:
+        measures.append("tổng")
+    if "count(" in sql_lower or "count(*)" in sql_lower:
+        measures.append("số lượng")
+    if "avg(" in sql_lower or "average(" in sql_lower:
+        measures.append("trung bình")
+    
+    # Detect dimensions (GROUP BY)
+    dimensions = []
+    if "group by" in sql_lower:
+        group_by_match = re.search(r'group\s+by\s+([^order\s]+)', sql_lower, re.IGNORECASE)
+        if group_by_match:
+            group_cols = group_by_match.group(1).strip()
+            # Extract column names (simple heuristic)
+            for col in group_cols.split(','):
+                col = col.strip().split()[-1]  # Get last word (column name)
+                if col and col not in ['1', '2', '3', '4', '5']:  # Skip positional numbers
+                    dimensions.append(col)
+    
+    # Build explanation
+    if main_table:
+        # Determine layer
+        if source_schema == "platinum":
+            layer_desc = "datamart tổng hợp (pre-aggregated)"
+            lineage = f"Bronze → Silver → Gold → Platinum (`{main_table}`)"
+        else:
+            layer_desc = "fact/dimension tables"
+            if "fact_" in main_table:
+                lineage = f"Bronze → Silver → Gold (`{main_table}`)"
+            elif "dim_" in main_table:
+                lineage = f"Bronze → Silver → Gold (`{main_table}` - dimension table)"
+            else:
+                lineage = f"Bronze → Silver → Gold (`{main_table}`)"
+        
+        explain_parts.append(f"• **Nguồn dữ liệu**: `lakehouse.{source_schema}.{main_table}` ({layer_desc})")
+        explain_parts.append(f"• **Lineage**: {lineage}")
+    
+    # Explain measures if detected
+    if measures:
+        measure_desc = ", ".join(measures)
+        explain_parts.append(f"• **Phép tính**: {measure_desc}")
+    
+    # Explain dimensions if detected
+    if dimensions and len(dimensions) <= 3:
+        dim_desc = ", ".join(dimensions[:3])
+        explain_parts.append(f"• **Nhóm theo**: {dim_desc}")
+    
+    # Add KPI explanations for common measures
+    if rows_preview and len(rows_preview) > 0:
+        columns = list(rows_preview[0].keys())
+        
+        # Check for common KPIs
+        kpi_explanations = {
+            "gmv": "GMV = tổng (price × quantity + freight_value)",
+            "revenue": "Revenue = tổng (price × quantity + freight_value)",
+            "aov": "AOV = GMV / số đơn hàng",
+            "orders": "Orders = số lượng đơn hàng duy nhất",
+            "units": "Units = tổng số lượng sản phẩm",
+            "retention": "Retention = (khách hàng active / cohort size) × 100%",
+            "on_time_rate": "On-time rate = (đơn giao đúng hạn / tổng đơn) × 100%"
+        }
+        
+        for col in columns:
+            col_lower = col.lower()
+            for kpi, explanation in kpi_explanations.items():
+                if kpi in col_lower:
+                    explain_parts.append(f"• **{col}**: {explanation}")
+                    break
+    
+    return "\n".join(explain_parts) if explain_parts else ""
+
+
 def _parse_schema_from_sql(sql: str) -> str:
     """
     Parse schema name (gold/platinum) from SQL query
@@ -195,6 +300,13 @@ def format_answer(
         else:
             # Fallback: brief info about results
             answer_parts.append(f"📊 **Kết quả:** {len(rows_preview)} dòng")
+            answer_parts.append("")  # Empty line
+        
+        # Add SQL explanation and lineage (Việc D)
+        explain_text = _explain_sql_and_lineage(sql_query, source_schema, rows_preview)
+        if explain_text:
+            answer_parts.append("🧠 **Cách tính:**")
+            answer_parts.append(explain_text)
             answer_parts.append("")  # Empty line
     
     # Add citations (if any)

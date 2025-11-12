@@ -25,6 +25,8 @@ from router import get_router
 from errors import GuardError, GuardCode
 from guard_message import message_and_suggestions
 from suggestions import suggestions_for, suggestions_for_non_sql
+from about_dataset_provider import get_about_dataset_card
+from about_project_provider import get_about_project_card
 
 # SQL parsing for safety
 try:
@@ -782,6 +784,9 @@ def ask(request: AskRequest):
     source_schema = None
     suggestions = None
     
+    # 0. Get session context (if available) for context-aware responses
+    session_context = get_session_context(session_id)
+    
     # 1. Generate SQL (or detect non-SQL modes)
     if request.prefer_sql:
         sql_query, metadata = build_sql(question)
@@ -865,94 +870,27 @@ def ask(request: AskRequest):
                             "Hãy hỏi mình bất kỳ câu hỏi nào về dữ liệu! 🚀"
                         )
             elif topic == "about_data":
-                answer = (
-                    "**📊 Dữ liệu TMĐT Brazil (Olist E-commerce Dataset)**\n\n"
-                    "**📈 Quy mô dữ liệu:**\n"
-                    "  • **Orders**: ~100,000 đơn hàng\n"
-                    "  • **Products**: ~32,000 sản phẩm\n"
-                    "  • **Sellers**: ~3,000 nhà bán\n"
-                    "  • **Customers**: ~100,000 khách hàng\n"
-                    "  • **Geolocation**: ~8,000 mã bưu điện (Brazil)\n\n"
-                    "**📅 Thời gian:**\n"
-                    "  • **Phạm vi**: 2016-09-04 đến 2018-10-17\n"
-                    "  • **Loại**: Batch data (không realtime)\n"
-                    "  • **Cập nhật**: Dữ liệu tĩnh, đã được xử lý và làm sạch\n\n"
-                    "**🏗️ Kiến trúc Medallion (Lakehouse):**\n"
-                    "  • **Bronze**: Raw data từ CSV (chưa xử lý)\n"
-                    "  • **Silver**: Data đã làm sạch, chuẩn hóa (null handling, type casting)\n"
-                    "  • **Gold**: Fact & Dimension tables (star schema)\n"
-                    "    - `fact_order`, `fact_order_item` (measures)\n"
-                    "    - `dim_product`, `dim_customer`, `dim_seller`, `dim_geolocation`, `dim_date`\n"
-                    "  • **Platinum**: Datamarts tổng hợp (pre-aggregated)\n\n"
-                    "**📦 Datamarts chính (Platinum layer):**\n"
-                    "  • `dm_sales_monthly_category`: Doanh thu theo danh mục/tháng (GMV, orders, units, AOV)\n"
-                    "  • `dm_customer_lifecycle`: Phân tích cohort & retention (customers_active, retention_pct)\n"
-                    "  • `dm_seller_kpi`: KPI nhà bán (GMV, orders, on_time_rate, cancel_rate, avg_review_score)\n"
-                    "  • `dm_logistics_sla`: SLA giao hàng theo vùng (delivery_days_avg, on_time_rate)\n"
-                    "  • `dm_payment_mix`: Tỷ trọng phương thức thanh toán (credit_card, boleto, voucher, debit_card)\n"
-                    "  • `demand_forecast`: Dự báo nhu cầu (ML model với confidence intervals)\n\n"
-                    "**💡 Lưu ý quan trọng:**\n"
-                    "  • Dữ liệu **batch** nên số liệu ổn định, không realtime\n"
-                    "  • Tất cả queries là **read-only** (chỉ SELECT, không INSERT/UPDATE/DELETE)\n"
-                    "  • Schema whitelist: chỉ truy vấn `lakehouse.gold` và `lakehouse.platinum`\n"
-                    "  • Tự động áp dụng **LIMIT** và **timeout** để bảo vệ hiệu suất\n\n"
-                    "**🔍 Bạn có thể hỏi:**\n"
-                    "  • \"Có bao nhiêu đơn hàng trong năm 2017?\"\n"
-                    "  • \"Top 5 danh mục sản phẩm bán chạy nhất?\"\n"
-                    "  • \"Dữ liệu được cập nhật lần cuối khi nào?\""
-                )
+                # Use provider to get dynamic dataset info from metadata
+                try:
+                    answer = get_about_dataset_card()
+                except Exception as e:
+                    print(f"⚠️  Error getting dataset card: {e}")
+                    # Fallback to static response
+                    answer = (
+                        "**📊 Dữ liệu TMĐT Brazil (Olist E-commerce Dataset)**\n\n"
+                        "**📈 Quy mô dữ liệu:**\n"
+                        "  • **Orders**: ~100,000 đơn hàng\n"
+                        "  • **Products**: ~32,000 sản phẩm\n"
+                        "  • **Sellers**: ~3,000 nhà bán\n"
+                        "  • **Customers**: ~100,000 khách hàng\n\n"
+                        "**📅 Thời gian:**\n"
+                        "  • **Phạm vi**: 2016-09-04 đến 2018-10-17\n"
+                        "  • **Loại**: Batch data (không realtime)\n\n"
+                        "**💡 Lưu ý**: Dữ liệu batch nên số liệu ổn định, không realtime."
+                    )
             elif topic == "about_project":
-                answer = (
-                    "**🏗️ Kiến trúc Lakehouse - Brazilian E-commerce Data Platform**\n\n"
-                    "**🎨 Presentation Layer (UI):**\n"
-                    "  • **Streamlit Dashboard** (http://localhost:8501)\n"
-                    "    - Executive Dashboard với 11 tabs (Revenue, Growth, Category, Geography, Seller, Operations, Customer, Finance, Forecast, Data Quality, Insights)\n"
-                    "    - Query Window (GUI builder + Manual SQL)\n"
-                    "    - Chat Interface (trợ lý AI)\n"
-                    "    - Forecast Explorer (ML predictions)\n"
-                    "  • **Metabase BI** (http://localhost:3000) - Business Intelligence tool\n"
-                    "  • **Dagster Dagit** (http://localhost:3001) - Data pipeline orchestration UI\n"
-                    "  • **Chat Service API** (http://localhost:8001) - REST API cho chatbot\n\n"
-                    "**⚙️ Processing Layer:**\n"
-                    "  • **Trino** (SQL query engine) - Distributed SQL queries trên Delta Lake\n"
-                    "  • **Apache Spark** (ETL processing) - Transform data Bronze → Silver → Gold → Platinum\n"
-                    "  • **MLflow** (ML model tracking) - Track forecasting models (LightGBM)\n"
-                    "  • **Chat Service** (FastAPI) - SQL generation + RAG + LLM summarization\n"
-                    "    - Intent router với 12 skills (Revenue, Products, Geography, Payment, Cohort, etc.)\n"
-                    "    - Guardrails (read-only, schema whitelist, auto LIMIT, timeout)\n"
-                    "    - Gemini integration (SQL generation + result summarization)\n\n"
-                    "**💾 Storage Layer:**\n"
-                    "  • **Delta Lake** trên MinIO (S3-compatible object storage)\n"
-                    "    - Bronze: Raw CSV data\n"
-                    "    - Silver: Cleaned data (Parquet format)\n"
-                    "    - Gold: Fact & Dimension tables (Delta format)\n"
-                    "    - Platinum: Pre-aggregated datamarts (Delta format)\n"
-                    "  • **MySQL** (Hive Metastore + Chat logging)\n"
-                    "  • **Qdrant** (Vector DB) - RAG embeddings cho document search\n\n"
-                    "**🔒 Security & Guardrails:**\n"
-                    "  • **Read-only** SQL queries (chỉ SELECT/WITH, không DDL/DML)\n"
-                    "  • **Schema whitelist** (chỉ `lakehouse.gold` và `lakehouse.platinum`)\n"
-                    "  • **Auto LIMIT** (mặc định 10,000 rows, có thể override)\n"
-                    "  • **Query timeout** (30 giây)\n"
-                    "  • **RAG với citations** (trích dẫn nguồn tài liệu)\n"
-                    "  • **AST parsing** (phát hiện SELECT *, dangerous functions)\n\n"
-                    "**📊 Use Cases:**\n"
-                    "  • **Business Analytics**: Revenue analysis, product performance, customer segmentation\n"
-                    "  • **Operational Metrics**: SLA tracking, seller KPI, logistics optimization\n"
-                    "  • **Forecasting**: Demand prediction với confidence intervals\n"
-                    "  • **Self-Service BI**: Natural language queries → SQL → Insights\n\n"
-                    "**💡 Tech Stack:**\n"
-                    "  • **Languages**: Python 3.10, SQL (Trino dialect)\n"
-                    "  • **Frameworks**: FastAPI, Streamlit, Dagster\n"
-                    "  • **Data**: Delta Lake, Apache Spark, Trino\n"
-                    "  • **ML**: LightGBM, MLflow, Google Gemini API\n"
-                    "  • **Infrastructure**: Docker, Docker Compose\n"
-                    "  • **Vector DB**: Qdrant\n\n"
-                    "**🚀 Để bắt đầu:**\n"
-                    "  • Hỏi mình về dữ liệu: \"Dataset của bạn gồm gì?\"\n"
-                    "  • Truy vấn số liệu: \"Doanh thu theo tháng gần đây?\"\n"
-                    "  • Khám phá dashboard: Truy cập http://localhost:8501"
-                )
+                # Use provider to get project architecture info
+                answer = get_about_project_card()
             else:
                 answer = "Xin chào! Mình có thể giúp gì cho bạn?"
             
