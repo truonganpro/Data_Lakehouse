@@ -810,60 +810,148 @@ def ask(request: AskRequest):
                 
                 if is_personal:
                     answer = (
-                        "Xin chào! 👋\n\n"
-                        "Mình không lưu thông tin cá nhân và cũng không nhận diện người dùng. "
-                        "Nhưng mình có thể giúp phân tích dữ liệu Olist.\n\n"
-                        "💡 **Bạn muốn xem:**\n"
-                        "  • **Doanh thu 3 tháng gần đây**\n"
-                        "  • **Top 10 sản phẩm bán chạy**\n\n"
-                        "Hoặc hỏi mình bất kỳ câu hỏi nào về dữ liệu!"
+                        "Xin chào! 👋 Mình là **trợ lý phân tích dữ liệu** cho hệ thống Brazilian E-commerce (Olist).\n\n"
+                        "**🎯 Chức năng của mình:**\n"
+                        "  • 🔍 **Truy vấn SQL thông minh**: Chuyển đổi câu hỏi tự nhiên thành SQL queries\n"
+                        "  • 📊 **Phân tích dữ liệu**: Doanh thu, sản phẩm, đơn hàng, thanh toán, logistics\n"
+                        "  • 📈 **KPI & Metrics**: GMV, AOV, retention, on-time rate, payment mix\n"
+                        "  • 🤖 **Tóm tắt kết quả**: Tự động tóm tắt insights từ dữ liệu (nếu có Gemini API)\n"
+                        "  • 📚 **RAG Citations**: Trích dẫn tài liệu liên quan khi giải thích KPI\n\n"
+                        "**🔒 Bảo mật & Quyền riêng tư:**\n"
+                        "  • Mình **không lưu** thông tin cá nhân của bạn\n"
+                        "  • Mình **không nhận diện** người dùng (mọi session độc lập)\n"
+                        "  • Chỉ truy vấn **read-only** trên schema `gold` và `platinum`\n"
+                        "  • Tự động áp dụng **LIMIT** và **timeout** để bảo vệ hệ thống\n\n"
+                        "**💡 Ví dụ câu hỏi bạn có thể hỏi:**\n"
+                        "  • \"Doanh thu theo tháng gần đây?\"\n"
+                        "  • \"Top 10 sản phẩm bán chạy nhất năm 2017?\"\n"
+                        "  • \"Phân bố đơn hàng theo bang?\"\n"
+                        "  • \"Tỷ lệ giao hàng đúng hạn theo tháng?\"\n"
+                        "  • \"Cohort retention của khách hàng?\"\n\n"
+                        "Hãy thử hỏi mình bất kỳ câu hỏi nào về dữ liệu Olist! 🚀"
                     )
                 else:
-                    answer = (
-                        "Chào bạn 👋\n\n"
-                        "Mình có thể giúp phân tích số liệu Olist. Bạn muốn xem:\n"
-                        "  • **Doanh thu 3 tháng gần đây**\n"
-                        "  • **Top 10 sản phẩm bán chạy**\n\n"
-                        "Hoặc hỏi mình bất kỳ câu hỏi nào về dữ liệu!"
-                    )
+                    # General greeting or thanks
+                    if any(kw in q_lower for kw in ["cảm ơn", "thanks", "thank you", "thank"]):
+                        answer = (
+                            "Không có gì! 😊\n\n"
+                            "Mình rất vui được giúp bạn phân tích dữ liệu. "
+                            "Nếu bạn có thêm câu hỏi nào khác về Olist data, cứ hỏi mình nhé!\n\n"
+                            "💡 **Gợi ý tiếp theo:**\n"
+                            "  • So sánh doanh thu theo quý\n"
+                            "  • Phân tích xu hướng thanh toán\n"
+                            "  • Top seller có on-time rate cao nhất"
+                        )
+                    elif any(kw in q_lower for kw in ["tạm biệt", "bye", "goodbye", "see you"]):
+                        answer = (
+                            "Tạm biệt bạn! 👋\n\n"
+                            "Cảm ơn bạn đã sử dụng dịch vụ. Chúc bạn một ngày tốt lành!\n\n"
+                            "Nếu cần phân tích dữ liệu, cứ quay lại hỏi mình nhé! 😊"
+                        )
+                    else:
+                        answer = (
+                            "Chào bạn! 👋\n\n"
+                            "Mình là trợ lý phân tích dữ liệu Olist. Mình có thể giúp bạn:\n\n"
+                            "**📊 Phân tích số liệu:**\n"
+                            "  • Doanh thu, GMV, AOV theo thời gian/danh mục/vùng\n"
+                            "  • Top sản phẩm, seller, danh mục\n"
+                            "  • Phân tích cohort & retention khách hàng\n"
+                            "  • SLA logistics (on-time rate, delivery days)\n"
+                            "  • Payment mix và xu hướng thanh toán\n\n"
+                            "**💡 Ví dụ câu hỏi:**\n"
+                            "  • \"Doanh thu 3 tháng gần đây?\"\n"
+                            "  • \"Top 10 sản phẩm bán chạy?\"\n"
+                            "  • \"Phân bố đơn hàng theo bang?\"\n\n"
+                            "Hãy hỏi mình bất kỳ câu hỏi nào về dữ liệu! 🚀"
+                        )
             elif topic == "about_data":
                 answer = (
-                    "**📊 Dữ liệu TMĐT Brazil (Olist)**\n\n"
-                    "• **Quy mô**: ~100k orders, ~32k products, ~9k sellers\n"
-                    "• **Thời gian**: 2016-2018 (batch data, không realtime)\n"
-                    "• **Kiến trúc**: Bronze → Silver → Gold → Platinum (Medallion)\n"
-                    "• **Datamarts chính**:\n"
-                    "  - `dm_sales_monthly_category`: Doanh thu theo danh mục/tháng\n"
-                    "  - `dm_customer_lifecycle`: Phân tích cohort & retention\n"
-                    "  - `dm_seller_kpi`: KPI nhà bán (GMV, on-time rate, cancel rate)\n"
-                    "  - `dm_logistics_sla`: SLA giao hàng theo vùng\n"
-                    "  - `dm_payment_mix`: Tỷ trọng phương thức thanh toán\n"
-                    "  - `demand_forecast`: Dự báo nhu cầu (ML)\n\n"
-                    "💡 **Lưu ý**: Dữ liệu batch nên số liệu ổn định, không realtime."
+                    "**📊 Dữ liệu TMĐT Brazil (Olist E-commerce Dataset)**\n\n"
+                    "**📈 Quy mô dữ liệu:**\n"
+                    "  • **Orders**: ~100,000 đơn hàng\n"
+                    "  • **Products**: ~32,000 sản phẩm\n"
+                    "  • **Sellers**: ~3,000 nhà bán\n"
+                    "  • **Customers**: ~100,000 khách hàng\n"
+                    "  • **Geolocation**: ~8,000 mã bưu điện (Brazil)\n\n"
+                    "**📅 Thời gian:**\n"
+                    "  • **Phạm vi**: 2016-09-04 đến 2018-10-17\n"
+                    "  • **Loại**: Batch data (không realtime)\n"
+                    "  • **Cập nhật**: Dữ liệu tĩnh, đã được xử lý và làm sạch\n\n"
+                    "**🏗️ Kiến trúc Medallion (Lakehouse):**\n"
+                    "  • **Bronze**: Raw data từ CSV (chưa xử lý)\n"
+                    "  • **Silver**: Data đã làm sạch, chuẩn hóa (null handling, type casting)\n"
+                    "  • **Gold**: Fact & Dimension tables (star schema)\n"
+                    "    - `fact_order`, `fact_order_item` (measures)\n"
+                    "    - `dim_product`, `dim_customer`, `dim_seller`, `dim_geolocation`, `dim_date`\n"
+                    "  • **Platinum**: Datamarts tổng hợp (pre-aggregated)\n\n"
+                    "**📦 Datamarts chính (Platinum layer):**\n"
+                    "  • `dm_sales_monthly_category`: Doanh thu theo danh mục/tháng (GMV, orders, units, AOV)\n"
+                    "  • `dm_customer_lifecycle`: Phân tích cohort & retention (customers_active, retention_pct)\n"
+                    "  • `dm_seller_kpi`: KPI nhà bán (GMV, orders, on_time_rate, cancel_rate, avg_review_score)\n"
+                    "  • `dm_logistics_sla`: SLA giao hàng theo vùng (delivery_days_avg, on_time_rate)\n"
+                    "  • `dm_payment_mix`: Tỷ trọng phương thức thanh toán (credit_card, boleto, voucher, debit_card)\n"
+                    "  • `demand_forecast`: Dự báo nhu cầu (ML model với confidence intervals)\n\n"
+                    "**💡 Lưu ý quan trọng:**\n"
+                    "  • Dữ liệu **batch** nên số liệu ổn định, không realtime\n"
+                    "  • Tất cả queries là **read-only** (chỉ SELECT, không INSERT/UPDATE/DELETE)\n"
+                    "  • Schema whitelist: chỉ truy vấn `lakehouse.gold` và `lakehouse.platinum`\n"
+                    "  • Tự động áp dụng **LIMIT** và **timeout** để bảo vệ hiệu suất\n\n"
+                    "**🔍 Bạn có thể hỏi:**\n"
+                    "  • \"Có bao nhiêu đơn hàng trong năm 2017?\"\n"
+                    "  • \"Top 5 danh mục sản phẩm bán chạy nhất?\"\n"
+                    "  • \"Dữ liệu được cập nhật lần cuối khi nào?\""
                 )
             elif topic == "about_project":
                 answer = (
-                    "**🏗️ Kiến trúc Lakehouse - Brazilian E-commerce Data**\n\n"
-                    "**🎨 UI Layer:**\n"
-                    "  • Streamlit Dashboard (http://localhost:8501)\n"
-                    "  • Metabase BI (http://localhost:3000)\n"
-                    "  • Dagster Dagit (http://localhost:3001)\n"
-                    "  • Chat Service API (http://localhost:8001)\n\n"
+                    "**🏗️ Kiến trúc Lakehouse - Brazilian E-commerce Data Platform**\n\n"
+                    "**🎨 Presentation Layer (UI):**\n"
+                    "  • **Streamlit Dashboard** (http://localhost:8501)\n"
+                    "    - Executive Dashboard với 11 tabs (Revenue, Growth, Category, Geography, Seller, Operations, Customer, Finance, Forecast, Data Quality, Insights)\n"
+                    "    - Query Window (GUI builder + Manual SQL)\n"
+                    "    - Chat Interface (trợ lý AI)\n"
+                    "    - Forecast Explorer (ML predictions)\n"
+                    "  • **Metabase BI** (http://localhost:3000) - Business Intelligence tool\n"
+                    "  • **Dagster Dagit** (http://localhost:3001) - Data pipeline orchestration UI\n"
+                    "  • **Chat Service API** (http://localhost:8001) - REST API cho chatbot\n\n"
                     "**⚙️ Processing Layer:**\n"
-                    "  • Trino (SQL query engine)\n"
-                    "  • Apache Spark (ETL processing)\n"
-                    "  • MLflow (ML model tracking)\n"
-                    "  • Chat Service (SQL generation + RAG)\n\n"
+                    "  • **Trino** (SQL query engine) - Distributed SQL queries trên Delta Lake\n"
+                    "  • **Apache Spark** (ETL processing) - Transform data Bronze → Silver → Gold → Platinum\n"
+                    "  • **MLflow** (ML model tracking) - Track forecasting models (LightGBM)\n"
+                    "  • **Chat Service** (FastAPI) - SQL generation + RAG + LLM summarization\n"
+                    "    - Intent router với 12 skills (Revenue, Products, Geography, Payment, Cohort, etc.)\n"
+                    "    - Guardrails (read-only, schema whitelist, auto LIMIT, timeout)\n"
+                    "    - Gemini integration (SQL generation + result summarization)\n\n"
                     "**💾 Storage Layer:**\n"
-                    "  • Delta Lake trên MinIO (S3-compatible)\n"
-                    "  • MySQL (Hive Metastore + Logging)\n"
-                    "  • Qdrant (Vector DB cho RAG)\n\n"
-                    "**🔒 Security:**\n"
-                    "  • Read-only SQL queries\n"
-                    "  • Schema whitelist (gold, platinum)\n"
-                    "  • Auto LIMIT & timeout\n"
-                    "  • RAG với citations\n\n"
-                    "💡 **Tech Stack**: Python, Docker, Trino, Spark, Delta Lake, MLflow"
+                    "  • **Delta Lake** trên MinIO (S3-compatible object storage)\n"
+                    "    - Bronze: Raw CSV data\n"
+                    "    - Silver: Cleaned data (Parquet format)\n"
+                    "    - Gold: Fact & Dimension tables (Delta format)\n"
+                    "    - Platinum: Pre-aggregated datamarts (Delta format)\n"
+                    "  • **MySQL** (Hive Metastore + Chat logging)\n"
+                    "  • **Qdrant** (Vector DB) - RAG embeddings cho document search\n\n"
+                    "**🔒 Security & Guardrails:**\n"
+                    "  • **Read-only** SQL queries (chỉ SELECT/WITH, không DDL/DML)\n"
+                    "  • **Schema whitelist** (chỉ `lakehouse.gold` và `lakehouse.platinum`)\n"
+                    "  • **Auto LIMIT** (mặc định 10,000 rows, có thể override)\n"
+                    "  • **Query timeout** (30 giây)\n"
+                    "  • **RAG với citations** (trích dẫn nguồn tài liệu)\n"
+                    "  • **AST parsing** (phát hiện SELECT *, dangerous functions)\n\n"
+                    "**📊 Use Cases:**\n"
+                    "  • **Business Analytics**: Revenue analysis, product performance, customer segmentation\n"
+                    "  • **Operational Metrics**: SLA tracking, seller KPI, logistics optimization\n"
+                    "  • **Forecasting**: Demand prediction với confidence intervals\n"
+                    "  • **Self-Service BI**: Natural language queries → SQL → Insights\n\n"
+                    "**💡 Tech Stack:**\n"
+                    "  • **Languages**: Python 3.10, SQL (Trino dialect)\n"
+                    "  • **Frameworks**: FastAPI, Streamlit, Dagster\n"
+                    "  • **Data**: Delta Lake, Apache Spark, Trino\n"
+                    "  • **ML**: LightGBM, MLflow, Google Gemini API\n"
+                    "  • **Infrastructure**: Docker, Docker Compose\n"
+                    "  • **Vector DB**: Qdrant\n\n"
+                    "**🚀 Để bắt đầu:**\n"
+                    "  • Hỏi mình về dữ liệu: \"Dataset của bạn gồm gì?\"\n"
+                    "  • Truy vấn số liệu: \"Doanh thu theo tháng gần đây?\"\n"
+                    "  • Khám phá dashboard: Truy cập http://localhost:8501"
                 )
             else:
                 answer = "Xin chào! Mình có thể giúp gì cho bạn?"
@@ -888,17 +976,40 @@ def ask(request: AskRequest):
             examples = get_example_questions()
             answer_parts = [
                 "👋 **Mình có thể giúp gì cho bạn?**\n",
-                "💡 **Khả năng:**",
-                "  • Truy vấn số liệu (SQL) trên lakehouse.gold & platinum",
-                "  • Phân tích doanh thu, sản phẩm, đơn hàng, thanh toán",
-                "  • Giải thích định nghĩa KPI từ tài liệu\n",
-                "📊 **Gợi ý câu hỏi phổ biến:**"
+                "Mình là trợ lý phân tích dữ liệu Olist với các khả năng sau:\n",
+                "**💡 Khả năng chính:**",
+                "  • 🔍 **Truy vấn SQL thông minh**: Chuyển đổi câu hỏi tự nhiên thành SQL queries",
+                "  • 📊 **Phân tích dữ liệu**: Doanh thu, sản phẩm, đơn hàng, thanh toán, logistics",
+                "  • 📈 **KPI & Metrics**: GMV, AOV, retention, on-time rate, payment mix",
+                "  • 🤖 **Tóm tắt kết quả**: Tự động tóm tắt insights (nếu có Gemini API)",
+                "  • 📚 **RAG Citations**: Trích dẫn tài liệu khi giải thích KPI\n",
+                "**🎯 Các chủ đề bạn có thể hỏi:**",
+                "  • **Doanh thu & Tăng trưởng**: MoM, YoY, GMV theo thời gian/danh mục",
+                "  • **Sản phẩm**: Top products, category analysis, product dimensions",
+                "  • **Địa lý**: Phân bố theo bang/thành phố, regional trends",
+                "  • **Seller**: KPI nhà bán, on-time rate, review scores",
+                "  • **Logistics**: SLA giao hàng, delivery days, on-time rate",
+                "  • **Thanh toán**: Payment mix, installments, payment trends",
+                "  • **Khách hàng**: Cohort analysis, retention, customer lifecycle",
+                "  • **Dự báo**: Demand forecast với confidence intervals\n",
+                "**📊 Gợi ý câu hỏi phổ biến:**"
             ]
             
-            for i, example in enumerate(examples[:7], 1):
+            for i, example in enumerate(examples[:8], 1):
                 answer_parts.append(f"  {i}. {example}")
             
-            answer_parts.append("\n💬 Hãy chọn một câu hỏi hoặc nhập câu hỏi của bạn!")
+            answer_parts.extend([
+                "\n**💬 Cách sử dụng:**",
+                "  • Hỏi bằng tiếng Việt hoặc tiếng Anh",
+                "  • Có thể chỉ định thời gian: \"3 tháng gần đây\", \"năm 2017\", \"Q3-2018\"",
+                "  • Có thể yêu cầu Top-N: \"Top 10\", \"Top 20\"",
+                "  • Có thể lọc theo danh mục, bang, seller\n",
+                "**🔒 Lưu ý:**",
+                "  • Chỉ truy vấn read-only (không thể INSERT/UPDATE/DELETE)",
+                "  • Schema whitelist: chỉ `lakehouse.gold` và `lakehouse.platinum`",
+                "  • Tự động áp dụng LIMIT và timeout để bảo vệ hiệu suất\n",
+                "Hãy chọn một câu hỏi ở trên hoặc nhập câu hỏi của bạn! 🚀"
+            ])
             
             answer = "\n".join(answer_parts)
             log_conversation(session_id, "assistant", answer)
