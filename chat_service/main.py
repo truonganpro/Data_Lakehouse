@@ -987,41 +987,52 @@ def ask(request: AskRequest):
                 # Update session context (Việc C - Context memory)
                 # Extract time window, dimensions, measures, grain from SQL/metadata
                 if skill_metadata:
-                    params = skill_metadata.get('params', {})
-                    time_window = params.get('time_window', {})
-                    time_grain = params.get('time_grain', {})
-                    
-                    # Format time window for storage
-                    if time_window and isinstance(time_window, dict):
-                        time_window_str = f"{time_window.get('start', '')}_to_{time_window.get('end', '')}"
-                    else:
-                        time_window_str = None
-                    
-                    # Extract dimensions and measures from SQL or results
-                    dimensions = []
-                    measures = []
-                    if rows_preview and len(rows_preview) > 0:
-                        columns = list(rows_preview[0].keys())
-                        # Common dimension columns
-                        dim_keywords = ['category', 'state', 'seller', 'customer', 'product', 'payment', 'month', 'year', 'dt']
-                        # Common measure columns
-                        measure_keywords = ['gmv', 'revenue', 'orders', 'units', 'aov', 'count', 'sum', 'avg']
+                    try:
+                        params = skill_metadata.get('params', {}) if isinstance(skill_metadata, dict) else {}
+                        time_window = params.get('time_window', {}) if isinstance(params, dict) else {}
+                        time_grain = params.get('time_grain', {}) if isinstance(params, dict) else {}
                         
-                        for col in columns:
-                            col_lower = col.lower()
-                            if any(kw in col_lower for kw in dim_keywords):
-                                dimensions.append(col)
-                            elif any(kw in col_lower for kw in measure_keywords):
-                                measures.append(col)
-                    
-                    # Update session context
-                    update_session_context(
-                        session_id,
-                        time_window=time_window_str,
-                        dimensions=dimensions[:3] if dimensions else None,
-                        measures=measures[:3] if measures else None,
-                        grain=time_grain.get('grain') if time_grain else None
-                    )
+                        # Format time window for storage
+                        if time_window and isinstance(time_window, dict):
+                            time_window_str = f"{time_window.get('start', '')}_to_{time_window.get('end', '')}"
+                        else:
+                            time_window_str = None
+                        
+                        # Extract grain (can be dict or string)
+                        grain_value = None
+                        if isinstance(time_grain, dict):
+                            grain_value = time_grain.get('grain')
+                        elif isinstance(time_grain, str):
+                            grain_value = time_grain
+                        
+                        # Extract dimensions and measures from SQL or results
+                        dimensions = []
+                        measures = []
+                        if rows_preview and len(rows_preview) > 0:
+                            columns = list(rows_preview[0].keys())
+                            # Common dimension columns
+                            dim_keywords = ['category', 'state', 'seller', 'customer', 'product', 'payment', 'month', 'year', 'dt']
+                            # Common measure columns
+                            measure_keywords = ['gmv', 'revenue', 'orders', 'units', 'aov', 'count', 'sum', 'avg']
+                            
+                            for col in columns:
+                                col_lower = col.lower()
+                                if any(kw in col_lower for kw in dim_keywords):
+                                    dimensions.append(col)
+                                elif any(kw in col_lower for kw in measure_keywords):
+                                    measures.append(col)
+                        
+                        # Update session context
+                        update_session_context(
+                            session_id,
+                            time_window=time_window_str,
+                            dimensions=dimensions[:3] if dimensions else None,
+                            measures=measures[:3] if measures else None,
+                            grain=grain_value
+                        )
+                    except Exception as e:
+                        print(f"⚠️  Error updating session context: {e}")
+                        # Continue without updating context
                 
             except GuardError as e:
                 # Handle guard errors with user-friendly messages and suggestions
