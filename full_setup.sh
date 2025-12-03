@@ -9,6 +9,7 @@ NC='\033[0m' # No Color
 
 # Default mode
 MODE="fresh"
+QUICK_MODE=false
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -25,6 +26,10 @@ while [[ $# -gt 0 ]]; do
             MODE="etl"
             shift
             ;;
+        --quick)
+            QUICK_MODE=true
+            shift
+            ;;
         --help|-h)
             cat << EOF
 ${BLUE}╔════════════════════════════════════════════════════════════╗${NC}
@@ -38,6 +43,7 @@ ${YELLOW}Options:${NC}
   --fresh       Clean install (remove volumes, rebuild all)
   --rebuild     Rebuild images only (keep data)
   --etl         Run ETL pipeline only (skip setup)
+  --quick       Quick mode (skip some checks, used by setup.sh)
   --help, -h    Show this help message
 
 ${YELLOW}Examples:${NC}
@@ -61,7 +67,7 @@ echo -e "${BLUE}╔════════════════════�
 echo -e "${BLUE}║   Data Lakehouse - Full Setup & ETL Pipeline              ║${NC}"
 echo -e "${BLUE}╚════════════════════════════════════════════════════════════╝${NC}"
 echo ""
-echo -e "${YELLOW}Mode: ${MODE}${NC}"
+echo -e "${YELLOW}Mode: ${MODE}${QUICK_MODE:+ (quick)}${NC}"
 echo ""
 
 # ============================================================================
@@ -132,36 +138,43 @@ fi
 # ============================================================================
 # MODE: FRESH (DEFAULT)
 # ============================================================================
-echo -e "${YELLOW}[1/9] Cleaning environment...${NC}"
-docker-compose down -v 2>/dev/null || true
-echo -e "${GREEN}✓ Environment cleaned${NC}"
-echo ""
+if [ "$QUICK_MODE" = false ]; then
+    echo -e "${YELLOW}[1/9] Cleaning environment...${NC}"
+    docker-compose down -v 2>/dev/null || true
+    echo -e "${GREEN}✓ Environment cleaned${NC}"
+    echo ""
 
-echo -e "${YELLOW}[2/9] Setting up environment variables...${NC}"
-if [ ! -f .env ]; then
-    cp env.example .env
-    echo -e "${GREEN}✓ Created .env from env.example${NC}"
+    echo -e "${YELLOW}[2/9] Setting up environment variables...${NC}"
+    if [ ! -f .env ]; then
+        cp env.example .env
+        echo -e "${GREEN}✓ Created .env from env.example${NC}"
+    else
+        echo -e "${GREEN}✓ .env already exists${NC}"
+    fi
+    echo ""
+
+    echo -e "${YELLOW}[3/9] Building Docker images (5-10 minutes)...${NC}"
+    docker-compose build
+    echo -e "${GREEN}✓ Images built successfully${NC}"
+    echo ""
+
+    echo -e "${YELLOW}[4/9] Starting services...${NC}"
+    docker-compose up -d
+    echo -e "${GREEN}✓ Services started${NC}"
+    echo ""
+
+    STEP_START=5
 else
-    echo -e "${GREEN}✓ .env already exists${NC}"
+    # Quick mode: skip cleaning, env setup, build, start (already done by setup.sh)
+    STEP_START=6
 fi
-echo ""
 
-echo -e "${YELLOW}[3/9] Building Docker images (5-10 minutes)...${NC}"
-docker-compose build
-echo -e "${GREEN}✓ Images built successfully${NC}"
-echo ""
-
-echo -e "${YELLOW}[4/9] Starting services...${NC}"
-docker-compose up -d
-echo -e "${GREEN}✓ Services started${NC}"
-echo ""
-
-echo -e "${YELLOW}[5/9] Waiting for MySQL (30 seconds)...${NC}"
+echo -e "${YELLOW}[${STEP_START}/9] Waiting for MySQL (30 seconds)...${NC}"
 sleep 30
 echo -e "${GREEN}✓ MySQL should be ready${NC}"
 echo ""
 
-echo -e "${YELLOW}[6/9] Loading dataset into MySQL...${NC}"
+echo -e "${YELLOW}[$((STEP_START+1))/9] Loading dataset into MySQL...${NC}"
 if [ ! -d "brazilian-ecommerce" ]; then
     echo -e "${RED}✗ Error: brazilian-ecommerce/ directory not found!${NC}"
     echo -e "${YELLOW}Please download from: https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce${NC}"
@@ -190,7 +203,7 @@ docker exec de_mysql bash -c "mysql -uroot -padmin123 --local-infile=1 brazillia
 echo -e "${GREEN}✓ Data loaded into MySQL${NC}"
 echo ""
 
-echo -e "${YELLOW}[7/9] Verifying MySQL data...${NC}"
+echo -e "${YELLOW}[$((STEP_START+2))/9] Verifying MySQL data...${NC}"
 CUSTOMER_COUNT=$(docker exec de_mysql mysql -uroot -padmin123 -sN -e "SELECT COUNT(*) FROM brazillian_ecommerce.customers;" 2>/dev/null)
 ORDER_COUNT=$(docker exec de_mysql mysql -uroot -padmin123 -sN -e "SELECT COUNT(*) FROM brazillian_ecommerce.orders;" 2>/dev/null)
 
@@ -204,7 +217,7 @@ echo "  • Customers: $CUSTOMER_COUNT"
 echo "  • Orders: $ORDER_COUNT"
 echo ""
 
-echo -e "${YELLOW}[8/9] Running ETL pipeline...${NC}"
+echo -e "${YELLOW}[$((STEP_START+3))/9] Running ETL pipeline...${NC}"
 echo "  → Waiting for Dagster to be ready (15 seconds)..."
 sleep 15
 echo "  → Executing ETL job..."
@@ -215,7 +228,7 @@ docker exec etl_pipeline dagster job execute -m etl_pipeline -j reload_data 2>/d
 echo -e "${GREEN}✓ ETL completed${NC}"
 echo ""
 
-echo -e "${YELLOW}[9/9] Final verification...${NC}"
+echo -e "${YELLOW}[$((STEP_START+4))/9] Final verification...${NC}"
 sleep 5
 docker exec trino trino --execute "SHOW SCHEMAS FROM lakehouse;" 2>/dev/null | grep -q bronze && echo "  ${GREEN}✓ Trino lakehouse OK${NC}" || echo "  ${YELLOW}⚠ Trino not ready yet${NC}"
 echo ""
@@ -223,32 +236,34 @@ echo ""
 # ============================================================================
 # SUMMARY
 # ============================================================================
-echo -e "${BLUE}╔════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${BLUE}║   Setup Complete! 🎉                                       ║${NC}"
-echo -e "${BLUE}╚════════════════════════════════════════════════════════════╝${NC}"
-echo ""
-echo -e "${YELLOW}📍 Access URLs:${NC}"
-echo "  • Dagster UI:     ${BLUE}http://localhost:3001${NC}"
-echo "  • Metabase:       ${BLUE}http://localhost:3000${NC}"
-echo "  • Spark Master:   ${BLUE}http://localhost:8080${NC}"
-echo "  • MinIO Console:  ${BLUE}http://localhost:9001${NC} (minio/minio123)"
-echo "  • Streamlit:      ${BLUE}http://localhost:8501${NC}"
-echo "  • Trino:          ${BLUE}http://localhost:8082${NC}"
-echo ""
-echo -e "${YELLOW}📊 Metabase Setup:${NC}"
-echo "  1. Open: ${BLUE}http://localhost:3000${NC}"
-echo "  2. Create admin account (email/password)"
-echo "  3. Add Database:"
-echo "     • Type: ${GREEN}Presto${NC}"
-echo "     • Host: ${GREEN}trino${NC}"
-echo "     • Port: ${GREEN}8080${NC}"
-echo "     • Database: ${GREEN}lakehouse${NC}"
-echo "  4. Select schemas: ${GREEN}bronze, silver, gold, platinum${NC}"
-echo ""
-echo -e "${YELLOW}🔧 Common Commands:${NC}"
-echo "  • Run ETL again:       ${GREEN}./full_setup.sh --etl${NC}"
-echo "  • Rebuild after fix:   ${GREEN}./full_setup.sh --rebuild${NC}"
-echo "  • Fresh install:       ${GREEN}./full_setup.sh --fresh${NC}"
-echo "  • Check services:      ${GREEN}docker-compose ps${NC}"
-echo ""
-echo -e "${GREEN}Happy Data Engineering! 🚀${NC}"
+if [ "$QUICK_MODE" = false ]; then
+    echo -e "${BLUE}╔════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${BLUE}║   Setup Complete! 🎉                                       ║${NC}"
+    echo -e "${BLUE}╚════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    echo -e "${YELLOW}📍 Access URLs:${NC}"
+    echo "  • Dagster UI:     ${BLUE}http://localhost:3001${NC}"
+    echo "  • Metabase:       ${BLUE}http://localhost:3000${NC}"
+    echo "  • Spark Master:   ${BLUE}http://localhost:8080${NC}"
+    echo "  • MinIO Console:  ${BLUE}http://localhost:9001${NC} (minio/minio123)"
+    echo "  • Streamlit:      ${BLUE}http://localhost:8501${NC}"
+    echo "  • Trino:          ${BLUE}http://localhost:8082${NC}"
+    echo ""
+    echo -e "${YELLOW}📊 Metabase Setup:${NC}"
+    echo "  1. Open: ${BLUE}http://localhost:3000${NC}"
+    echo "  2. Create admin account (email/password)"
+    echo "  3. Add Database:"
+    echo "     • Type: ${GREEN}Presto${NC}"
+    echo "     • Host: ${GREEN}trino${NC}"
+    echo "     • Port: ${GREEN}8080${NC}"
+    echo "     • Database: ${GREEN}lakehouse${NC}"
+    echo "  4. Select schemas: ${GREEN}bronze, silver, gold, platinum${NC}"
+    echo ""
+    echo -e "${YELLOW}🔧 Common Commands:${NC}"
+    echo "  • Run ETL again:       ${GREEN}./full_setup.sh --etl${NC}"
+    echo "  • Rebuild after fix:   ${GREEN}./full_setup.sh --rebuild${NC}"
+    echo "  • Fresh install:       ${GREEN}./full_setup.sh --fresh${NC}"
+    echo "  • Check services:      ${GREEN}docker-compose ps${NC}"
+    echo ""
+    echo -e "${GREEN}Happy Data Engineering! 🚀${NC}"
+fi

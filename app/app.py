@@ -82,11 +82,11 @@ st.markdown("""
 # Quick CTA Buttons
 ctaA, ctaB, ctaC, ctaD = st.columns([1,1,1,1])
 with ctaA:
-    st.page_link("pages/1_📊_Query_Window.py", label="📊 Query Window", help="OLAP ROLLUP/GROUPING SETS", use_container_width=True)
+    st.page_link("pages/1_Query_Window.py", label="📊 Query Window", help="OLAP ROLLUP/GROUPING SETS", use_container_width=True)
 with ctaB:
-    st.page_link("pages/2_💬_Chat.py", label="💬 Chat Analytics", help="Natural Language to SQL", use_container_width=True)
+    st.page_link("pages/2_Chat.py", label="💬 Chat Analytics", help="Natural Language to SQL", use_container_width=True)
 with ctaC:
-    st.page_link("pages/4_👔_Executive_Dashboard.py", label="👔 Executive Dashboard", help="Báo cáo trực tiếp cho lãnh đạo", use_container_width=True)
+    st.page_link("pages/4_Executive_Dashboard.py", label="👔 Executive Dashboard", help="Báo cáo trực tiếp cho lãnh đạo", use_container_width=True)
 with ctaD:
     st.link_button("⚙️ Dagster", "http://localhost:3001", help="ETL Orchestration", use_container_width=True)
 
@@ -149,7 +149,7 @@ with tab_services:
         <div class='desc'>Truy vấn đa chiều (OLAP) với ROLLUP, GROUPING SETS</div>
         </div>
         """, unsafe_allow_html=True)
-        st.page_link("pages/1_📊_Query_Window.py", label="Mở Query Window", icon="📊", use_container_width=True)
+        st.page_link("pages/1_Query_Window.py", label="Mở Query Window", icon="📊", use_container_width=True)
         
         st.markdown("")
         
@@ -160,7 +160,7 @@ with tab_services:
         <div class='desc'>Hỏi đáp bằng ngôn ngữ tự nhiên với SQL + RAG</div>
         </div>
         """, unsafe_allow_html=True)
-        st.page_link("pages/2_💬_Chat.py", label="Mở Chat", icon="💬", use_container_width=True)
+        st.page_link("pages/2_Chat.py", label="Mở Chat", icon="💬", use_container_width=True)
         
         st.markdown("")
         
@@ -171,7 +171,7 @@ with tab_services:
         <div class='desc'>Khám phá dự báo nhu cầu với Machine Learning</div>
         </div>
         """, unsafe_allow_html=True)
-        st.page_link("pages/3_📈_Forecast_Explorer.py", label="Mở Forecast Explorer", icon="📈", use_container_width=True)
+        st.page_link("pages/3_Forecast_Explorer.py", label="Mở Forecast Explorer", icon="📈", use_container_width=True)
         
         st.markdown("")
         
@@ -182,7 +182,7 @@ with tab_services:
         <div class='desc'>Báo cáo trực tiếp cho lãnh đạo với 10 dashboard và nhiều biểu đồ</div>
         </div>
         """, unsafe_allow_html=True)
-        st.page_link("pages/4_👔_Executive_Dashboard.py", label="Mở Executive Dashboard", icon="👔", use_container_width=True)
+        st.page_link("pages/4_Executive_Dashboard.py", label="Mở Executive Dashboard", icon="👔", use_container_width=True)
         
         st.markdown("")
         

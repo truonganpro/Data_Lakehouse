@@ -1,9 +1,9 @@
 #!/bin/bash
 # ===================================================================
-# 🚀 DATA LAKEHOUSE FRESH - COMPLETE SETUP SCRIPT
+# 🚀 DATA LAKEHOUSE FRESH - QUICK SETUP SCRIPT
 # ===================================================================
-# Automated setup script for deploying the Data Lakehouse project
-# on a new machine.
+# Quick setup script for new users with interactive prompts
+# For full automated setup, use: ./full_setup.sh
 
 set -e  # Exit on error
 
@@ -12,7 +12,6 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-MAGENTA='\033[0;35m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
@@ -55,7 +54,7 @@ print_info() {
 print_header "Pre-flight Checks"
 
 # Check Docker
-print_step "1/1" "Checking Docker installation..."
+print_step "1/3" "Checking Docker installation..."
 if ! command -v docker &> /dev/null; then
     print_error "Docker is not installed!"
     echo "Please install Docker: https://docs.docker.com/get-docker/"
@@ -78,7 +77,7 @@ fi
 print_success "Docker Compose found"
 
 # Check available disk space (minimum 20GB)
-print_step "1/2" "Checking disk space..."
+print_step "2/3" "Checking disk space..."
 AVAILABLE_SPACE=$(df -BG . | awk 'NR==2 {print $4}' | sed 's/G//')
 if [ "$AVAILABLE_SPACE" -lt 20 ]; then
     print_warning "Low disk space: ${AVAILABLE_SPACE}GB available (recommended: 20GB+)"
@@ -92,9 +91,9 @@ else
 fi
 
 # Check available RAM (minimum 8GB)
-print_step "2/2" "Checking RAM..."
-TOTAL_RAM=$(free -g | awk '/^Mem:/{print $2}')
-if [ "$TOTAL_RAM" -lt 8 ]; then
+print_step "3/3" "Checking RAM..."
+TOTAL_RAM=$(free -g | awk '/^Mem:/{print $2}' 2>/dev/null || sysctl -n hw.memsize | awk '{print int($1/1024/1024/1024)}')
+if [ -z "$TOTAL_RAM" ] || [ "$TOTAL_RAM" -lt 8 ]; then
     print_warning "Low RAM: ${TOTAL_RAM}GB total (recommended: 8GB+)"
     read -p "Continue anyway? (y/N): " -n 1 -r
     echo
@@ -154,14 +153,14 @@ fi
 
 print_header "Downloading Dependencies"
 
-if [ ! -f download_jars.sh ]; then
-    print_error "download_jars.sh not found!"
+if [ ! -f scripts/download_jars.sh ]; then
+    print_error "scripts/download_jars.sh not found!"
     exit 1
 fi
 
-chmod +x download_jars.sh
+chmod +x scripts/download_jars.sh
 print_step "Downloading" "Spark JARs (hadoop-aws, delta-core, mysql-connector)..."
-bash download_jars.sh
+bash scripts/download_jars.sh
 print_success "Dependencies downloaded"
 
 # ===================================================================
@@ -207,10 +206,10 @@ sleep 20
 print_success "All services started"
 
 # ===================================================================
-# Load dataset
+# Load dataset and run ETL (via full_setup.sh)
 # ===================================================================
 
-print_header "Loading Dataset"
+print_header "Loading Dataset & Running ETL"
 
 if [ ! -d "brazilian-ecommerce" ]; then
     print_error "brazilian-ecommerce/ directory not found!"
@@ -221,70 +220,22 @@ if [ ! -d "brazilian-ecommerce" ]; then
     echo
     if [[ ! $REPLY =~ ^[Nn]$ ]]; then
         print_warning "Skipping dataset loading"
-        SKIP_ETL=true
+        SKIP_DATA=true
     else
         exit 1
     fi
 fi
 
-if [ ! "$SKIP_ETL" = true ]; then
-    print_step "1/2" "Copying dataset to MySQL container..."
-    docker cp brazilian-ecommerce/ de_mysql:/tmp/dataset/ || {
-        print_error "Failed to copy dataset"
-        exit 1
+if [ ! "$SKIP_DATA" = true ]; then
+    print_info "Calling full_setup.sh to load data and run ETL..."
+    print_info "This will load CSV data and run the ETL pipeline (5-10 minutes)"
+    echo ""
+    
+    # Call full_setup.sh in quick mode (skip build/start, only load data + ETL)
+    bash ./full_setup.sh --quick || {
+        print_error "Data loading or ETL failed"
+        print_info "You can try running manually: ./full_setup.sh --etl"
     }
-    print_success "Dataset copied"
-    
-    print_step "2/2" "Loading data into MySQL (this takes 2-3 minutes)..."
-    
-    # Check if SQL scripts exist
-    if [ ! -f load_dataset_into_mysql/00_init_dagster.sql ]; then
-        print_error "SQL initialization scripts not found!"
-        exit 1
-    fi
-    
-    # Initialize Dagster database
-    docker cp load_dataset_into_mysql/00_init_dagster.sql de_mysql:/tmp/init_dagster.sql
-    docker exec de_mysql mysql -uroot -padmin123 < /tmp/init_dagster.sql || true
-    
-    # Load dataset
-    docker cp load_dataset_into_mysql/01_olist.sql de_mysql:/tmp/olist.sql
-    docker exec de_mysql mysql -uroot -padmin123 -e "CREATE DATABASE IF NOT EXISTS brazillian_ecommerce;"
-    docker exec de_mysql mysql -uroot -padmin123 brazillian_ecommerce < /tmp/olist.sql || true
-    
-    # Note: Actual data loading should be done manually or via full_setup.sh
-    print_success "Database schema created"
-    print_warning "Actual CSV data loading skipped (use full_setup.sh for complete setup)"
-fi
-
-# ===================================================================
-# Run ETL pipeline
-# ===================================================================
-
-print_header "Running ETL Pipeline"
-
-print_info "Checking if ETL can be run..."
-
-# Check if data exists in MySQL
-CUSTOMER_COUNT=$(docker exec de_mysql mysql -uroot -padmin123 -sN -e "SELECT COUNT(*) FROM brazillian_ecommerce.customers;" 2>/dev/null || echo "0")
-
-if [ "$CUSTOMER_COUNT" -eq 0 ]; then
-    print_warning "No data found in MySQL"
-    print_info "Skipping ETL pipeline run"
-    print_info "You can run it later with: ./full_setup.sh --etl"
-else
-    print_info "Found $CUSTOMER_COUNT customers in MySQL"
-    read -p "Run ETL pipeline now? (y/N): " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        print_step "Running" "ETL pipeline..."
-        docker exec etl_pipeline dagster job execute -m etl_pipeline -j reload_data || {
-            print_error "ETL pipeline failed"
-            print_info "You can try running it manually later"
-        }
-    else
-        print_info "Skipping ETL pipeline"
-    fi
 fi
 
 # ===================================================================
@@ -339,6 +290,9 @@ print_header "Setup Complete!"
 
 echo -e "${GREEN}✓${NC} Docker images built and started"
 echo -e "${GREEN}✓${NC} Services are running"
+if [ ! "$SKIP_DATA" = true ]; then
+    echo -e "${GREEN}✓${NC} Dataset loaded and ETL completed"
+fi
 echo ""
 echo -e "${YELLOW}📍 Access URLs:${NC}"
 echo "  • Streamlit App:   ${BLUE}http://localhost:8501${NC}"
@@ -351,8 +305,12 @@ echo "  • Chat Service:    ${BLUE}http://localhost:8001${NC}"
 echo ""
 echo -e "${YELLOW}📊 Next Steps:${NC}"
 echo "  1. Open ${BLUE}http://localhost:8501${NC} to access the main dashboard"
-echo "  2. If dataset is not loaded, run: ${GREEN}./full_setup.sh --etl${NC}"
-echo "  3. To run forecasting pipeline: ${GREEN}./run_forecast_pipeline.sh${NC}"
+if [ "$SKIP_DATA" = true ]; then
+    echo "  2. Load dataset: ${GREEN}./full_setup.sh --quick${NC}"
+    echo "  3. Run ETL: ${GREEN}./full_setup.sh --etl${NC}"
+else
+    echo "  2. To run forecasting pipeline: ${GREEN}./scripts/run_forecast.sh${NC}"
+fi
 echo "  4. To check service logs: ${GREEN}docker-compose logs -f <service_name>${NC}"
 echo ""
 echo -e "${YELLOW}🔧 Useful Commands:${NC}"
@@ -360,6 +318,7 @@ echo "  • Check all services:     ${GREEN}docker-compose ps${NC}"
 echo "  • View logs:              ${GREEN}docker-compose logs -f${NC}"
 echo "  • Stop all services:      ${GREEN}docker-compose down${NC}"
 echo "  • Restart services:       ${GREEN}docker-compose restart${NC}"
+echo "  • Full setup (fresh):     ${GREEN}./full_setup.sh --fresh${NC}"
 echo "  • Rebuild after changes:  ${GREEN}./full_setup.sh --rebuild${NC}"
 echo ""
 echo -e "${YELLOW}⚠️  Important Notes:${NC}"
@@ -370,4 +329,3 @@ echo "  • Check logs if any service fails to start"
 echo ""
 echo -e "${GREEN}Happy Data Engineering! 🚀${NC}"
 echo ""
-
