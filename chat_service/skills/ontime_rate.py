@@ -31,21 +31,78 @@ class OntimeRateSkill(BaseSkill):
         start = params['time_window']['start']
         end = params['time_window']['end']
         grain = params['time_grain']
+        q = question.lower()
         
-        sql = f"""
-        SELECT 
-            date_trunc('{grain}', f.full_date) AS bucket,
-            ROUND(100.0 * SUM(CASE WHEN f.delivered_on_time = 1 THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2) AS ontime_rate_pct,
-            ROUND(100.0 * SUM(CASE WHEN f.delivered_on_time = 0 THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2) AS late_rate_pct,
-            ROUND(100.0 * SUM(CASE WHEN f.is_canceled = 1 THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2) AS cancel_rate_pct,
-            COUNT(*) AS total_orders
-        FROM lakehouse.gold.fact_order f
-        WHERE f.full_date BETWEEN DATE '{start}' AND DATE '{end}'
-          AND f.full_date IS NOT NULL
-        GROUP BY 1
-        ORDER BY 1 DESC
-        LIMIT 200
-        """
+        # Check if question asks for SLA by region/bang (not time-series)
+        wants_region = any(
+            kw in q
+            for kw in [
+                'bang',
+                'state',
+                'vùng',
+                'miền',
+                'region',
+                'theo bang',
+                'theo vùng',
+                'theo miền',
+                'by region',
+                'by state',
+            ]
+        )
+        
+        if wants_region:
+            # SLA theo bang (seller region)
+            sql = f"""
+            SELECT 
+                s.city_state AS region,
+                ROUND(
+                    100.0 * SUM(CASE WHEN f.delivered_on_time THEN 1 ELSE 0 END)
+                    / NULLIF(COUNT(*), 0),
+                    2
+                ) AS ontime_rate_pct,
+                ROUND(
+                    100.0 * SUM(CASE WHEN NOT f.delivered_on_time THEN 1 ELSE 0 END)
+                    / NULLIF(COUNT(*), 0),
+                    2
+                ) AS late_rate_pct,
+                COUNT(*) AS total_orders
+            FROM lakehouse.gold.fact_order f
+            JOIN lakehouse.gold.fact_order_item i ON f.order_id = i.order_id
+            LEFT JOIN lakehouse.gold.dim_seller s ON i.seller_id = s.seller_id
+            WHERE f.full_date BETWEEN DATE '{start}' AND DATE '{end}'
+              AND f.full_date IS NOT NULL
+            GROUP BY 1
+            ORDER BY ontime_rate_pct DESC
+            LIMIT 50
+            """
+        else:
+            # SLA theo thời gian (day/week/month)
+            sql = f"""
+            SELECT 
+                date_trunc('{grain}', f.full_date) AS bucket,
+                ROUND(
+                    100.0 * SUM(CASE WHEN f.delivered_on_time THEN 1 ELSE 0 END)
+                    / NULLIF(COUNT(*), 0),
+                    2
+                ) AS ontime_rate_pct,
+                ROUND(
+                    100.0 * SUM(CASE WHEN NOT f.delivered_on_time THEN 1 ELSE 0 END)
+                    / NULLIF(COUNT(*), 0),
+                    2
+                ) AS late_rate_pct,
+                ROUND(
+                    100.0 * SUM(CASE WHEN f.is_canceled THEN 1 ELSE 0 END)
+                    / NULLIF(COUNT(*), 0),
+                    2
+                ) AS cancel_rate_pct,
+                COUNT(*) AS total_orders
+            FROM lakehouse.gold.fact_order f
+            WHERE f.full_date BETWEEN DATE '{start}' AND DATE '{end}'
+              AND f.full_date IS NOT NULL
+            GROUP BY 1
+            ORDER BY 1 DESC
+            LIMIT 200
+            """
         
         return sql.strip()
 

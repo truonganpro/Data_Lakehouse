@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   # ========================
   # 🐬 MYSQL (Metastore)
@@ -7,11 +5,11 @@ services:
   de_mysql:
     image: mysql:8.0
     container_name: de_mysql
-    command: --default-authentication-plugin=mysql_native_password --defaults-file=/etc/mysql/my.cnf
+    command: --default-authentication-plugin=mysql_native_password
     volumes:
       - ./mysql:/var/lib/mysql
       - ./load_dataset_into_mysql:/docker-entrypoint-initdb.d:ro
-      - ./docker_image/mysql/my.cnf:/etc/mysql/my.cnf:ro
+      - ./docker_image/mysql/my.cnf:/etc/mysql/conf.d/custom.cnf:ro
     ports:
       - "3306:3306"
     env_file:
@@ -38,7 +36,7 @@ services:
       de_mysql:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "bash", "-c", "nc -z localhost 9083 || exit 1"]
+      test: ["CMD", "bash", "-c", "timeout 2 bash -c '</dev/tcp/localhost/9083' || exit 1"]
       interval: 10s
       timeout: 3s
       retries: 10
@@ -75,6 +73,12 @@ services:
       - .env
     networks:
       - de_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
 
   # MinIO Client (setup buckets)
   mc:
@@ -86,7 +90,7 @@ services:
       - .env
     entrypoint: >
       /bin/sh -c "
-        until (/usr/bin/mc config host add minio http://minio:9000 minio minio123)
+        until (/usr/bin/mc alias set minio http://minio:9000 minio minio123)
         do echo '...waiting...' && sleep 1; done;
         /usr/bin/mc mb minio/lakehouse || true;
         /usr/bin/mc policy set public minio/lakehouse;
@@ -117,7 +121,8 @@ services:
   metabase:
     image: metabase/metabase:latest
     container_name: metabase
-    platform: linux/amd64
+    # FIX: Apple Silicon (arm64) - không dùng amd64 để tránh Rosetta emulation gây SIGSEGV
+    platform: linux/arm64
     hostname: metabase
     ports:
       - "3000:3000"
@@ -125,6 +130,7 @@ services:
       # Metabase application database (SQLite for simplicity)
       MB_DB_TYPE: h2
       MB_DB_FILE: /metabase-data/metabase.db
+      MB_JETTY_HOST: 0.0.0.0
       # Trino connection will be configured via UI
     depends_on:
       - trino
@@ -137,7 +143,8 @@ services:
       test: ["CMD", "curl", "--fail", "-I", "http://localhost:3000/api/health"]
       interval: 15s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 60s
 
   # ========================
   # 🔥 SPARK CLUSTER
@@ -155,6 +162,7 @@ services:
       - "8080:8080"
     volumes:
       - ./jars:/opt/jars
+      - ./scripts:/scripts:ro
       - ./docker_image/spark/conf/spark-defaults.conf:/opt/bitnami/spark/conf/spark-defaults.conf
     networks:
       - de_network
@@ -174,6 +182,7 @@ services:
       - "8081:8081"
     volumes:
       - ./jars:/opt/jars
+      - ./scripts:/scripts:ro
       - ./docker_image/spark/conf/spark-defaults.conf:/opt/bitnami/spark/conf/spark-defaults.conf
     networks:
       - de_network
@@ -190,10 +199,19 @@ services:
       - MLFLOW_S3_ENDPOINT_URL=http://minio:9000
       - AWS_ACCESS_KEY_ID=minio
       - AWS_SECRET_ACCESS_KEY=minio123
+      # Trino
+      - TRINO_HOST=trino
+      - TRINO_PORT=8080
+      - TRINO_CATALOG=lakehouse
+      - TRINO_DEFAULT_SCHEMA=gold
+      - TRINO_USER=admin
+      - TRINO_PASSWORD=${TRINO_PASSWORD:-}
     volumes:
       - ./app:/app
     networks:
-      - de_network 
+      - de_network
+    depends_on:
+      - trino 
 
   # ========================
   # 🔄 ETL PIPELINE
@@ -207,7 +225,9 @@ services:
       - "4000:4000"
     volumes:
       - ./jars:/opt/jars
+      - ./scripts:/scripts:ro
       - ./dagster_home:/opt/dagster/dagster_home
+      - /var/run/docker.sock:/var/run/docker.sock  # Required to run docker exec from container
     environment:
       - JARS_DIR=/opt/jars
       - SPARK_DIST_CLASSPATH=/opt/jars/*
@@ -307,11 +327,8 @@ services:
       - ./qdrant_data:/qdrant/storage
     networks:
       - de_network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+    # Healthcheck disabled - qdrant is working fine, but container doesn't have curl/wget/python
+    # Service is verified working via: curl http://localhost:6333/collections
 
   chat_service:
     build:
@@ -322,9 +339,12 @@ services:
       - "8001:8001"
     environment:
       # LLM & Embedding Providers
-      LLM_PROVIDER: gemini
+      LLM_PROVIDER: ${LLM_PROVIDER:-gemini}
+      LLM_MODEL_SQL: ${LLM_MODEL_SQL:-gpt-4o-mini}
+      LLM_MODEL_SUM: ${LLM_MODEL_SUM:-gpt-4o-mini}
+      LLM_API_KEY: ${LLM_API_KEY:-}
       EMBEDDING_PROVIDER: gemini
-      GOOGLE_API_KEY: ${GOOGLE_API_KEY}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
       SBERT_MODEL: intfloat/multilingual-e5-base
       # Trino
       TRINO_HOST: trino
@@ -332,17 +352,31 @@ services:
       TRINO_CATALOG: lakehouse
       TRINO_DEFAULT_SCHEMA: gold
       TRINO_USER: chatbot
-      TRINO_PASSWORD: ""
+      TRINO_PASSWORD: ${TRINO_PASSWORD:-}
       # Qdrant
       QDRANT_HOST: qdrant
       QDRANT_PORT: 6333
       # Audit logs (MySQL)
       LOG_DB_URI: mysql+pymysql://root:admin123@de_mysql:3306/chatlogs
       # Safety policies
-      SQL_WHITELIST_SCHEMAS: gold,platinum
+      SQL_WHITELIST_SCHEMAS: gold,platinum,platinum_sys
       SQL_DEFAULT_LIMIT: "200"
       SQL_MAX_ROWS: "5000"
       SQL_TIMEOUT_SECS: "45"
+      # Rate Limiting
+      RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
+      RATE_LIMIT_WINDOW_S: ${RATE_LIMIT_WINDOW_S:-60}
+      RATE_LIMIT_MAX_REQ: ${RATE_LIMIT_MAX_REQ:-30}
+      # Feature Flags
+      ENABLE_SUGGESTED_ACTIONS: ${ENABLE_SUGGESTED_ACTIONS:-true}
+      ENABLE_EXPLANATION: ${ENABLE_EXPLANATION:-true}
+      # Security
+      MAX_REQUEST_SIZE: ${MAX_REQUEST_SIZE:-262144}
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
+      # Observability
+      ENABLE_METRICS: ${ENABLE_METRICS:-true}
+      ENABLE_STRUCTURED_LOGS: ${ENABLE_STRUCTURED_LOGS:-true}
+      ENABLE_TRACE_IDS: ${ENABLE_TRACE_IDS:-true}
       TZ: Asia/Ho_Chi_Minh
     volumes:
       - ./chat_service:/app
@@ -354,7 +388,7 @@ services:
       - trino
       - de_mysql
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/healthz').read()"]
       interval: 30s
       timeout: 10s
       retries: 3

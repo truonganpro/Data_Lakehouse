@@ -21,6 +21,23 @@ reload_data_schedule = ScheduleDefinition(
     cron_schedule="0 0 * * *",  # every day at 00:00
 )
 
+# Export maintenance schedules
+try:
+    from .maintenance_schedule import (
+        daily_compaction_gold_schedule,
+        daily_compaction_platinum_schedule,
+        weekly_vacuum_schedule,
+        daily_small_files_monitor_schedule
+    )
+except ImportError:
+    pass
+
+# Export optimize schedule
+try:
+    from .optimize_schedule import daily_optimize_lakehouse_schedule
+except ImportError:
+    pass
+
 
 
 

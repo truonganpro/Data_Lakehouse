@@ -1,494 +1,269 @@
-# 🏗️ Modern Data Stack - Data Lakehouse Project
+# Data Lakehouse - Modern Data Stack
 
-> **Ứng dụng Modern Data Stack (MDS) để xây dựng Data Lakehouse hỗ trợ phân tích dữ liệu bán hàng thương mại điện tử**
+Hệ thống Data Lakehouse hoàn chỉnh với ETL Pipeline, OLAP Query Engine, AI Chatbot, và BI Dashboards.
 
-[![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://www.docker.com/)
-[![Apache Spark](https://img.shields.io/badge/Apache_Spark-E25A1C?style=for-the-badge&logo=apachespark&logoColor=white)](https://spark.apache.org/)
-[![Delta Lake](https://img.shields.io/badge/Delta_Lake-00ADD8?style=for-the-badge&logo=delta&logoColor=white)](https://delta.io/)
-[![Trino](https://img.shields.io/badge/Trino-FF6900?style=for-the-badge&logo=trino&logoColor=white)](https://trino.io/)
-[![Dagster](https://img.shields.io/badge/Dagster-000000?style=for-the-badge&logo=dagster&logoColor=white)](https://dagster.io/)
-[![Metabase](https://img.shields.io/badge/Metabase-509EE3?style=for-the-badge&logo=metabase&logoColor=white)](https://www.metabase.com/)
-
----
-
-## 📋 Mục lục
-
-- [🎯 Tổng quan dự án](#-tổng-quan-dự-án)
-- [🏗️ Kiến trúc hệ thống](#️-kiến-trúc-hệ-thống)
-- [🛠️ Công nghệ sử dụng](#️-công-nghệ-sử-dụng)
-- [🚀 Cài đặt và chạy](#-cài-đặt-và-chạy)
-- [📊 Dataset](#-dataset)
-- [📈 Data Layers](#-data-layers)
-- [🎨 Dashboard và BI](#-dashboard-và-bi)
-- [🧪 Testing](#-testing)
-- [📚 Tài liệu tham khảo](#-tài-liệu-tham-khảo)
-
----
-
-## 🎯 Tổng quan dự án
-
-### Mục tiêu
-
-Xây dựng một hệ thống **Data Lakehouse** hoàn chỉnh sử dụng **Modern Data Stack** để:
-
-- ✅ **Thu thập và xử lý** dữ liệu thương mại điện tử Brazilian E-commerce
-- ✅ **Tổ chức dữ liệu** theo mô hình **Medallion Architecture** (Bronze → Silver → Gold → Platinum)
-- ✅ **Phân tích và trực quan hóa** dữ liệu qua BI dashboard
-- ✅ **Triển khai container hóa** với Docker Compose
-
----
-
-## 🏗️ Kiến trúc hệ thống
+## 🏗️ Kiến trúc
 
 ```
-MySQL (Brazilian E-commerce Data)
-    ↓
-Bronze Layer → MinIO (lakehouse/bronze/)
-    ↓
-Silver Layer → MinIO (lakehouse/silver/)
-    ↓
-Gold Layer → MinIO (lakehouse/gold/)
-    ↓
-Platinum Layer → MinIO (lakehouse/platinum/)
-    ↓
-Trino (catalog: minio, schema: platinum)
-    ↓
-Metabase (http://localhost:3000)
+┌─────────────────────────────────────────────────────────┐
+│              USER INTERFACES                            │
+├──────────┬──────────┬──────────┬───────────────────────┤
+│ Streamlit│ Metabase │  Dagster │   Chat Service        │
+│  :8501   │  :3000   │  :3001   │      :8001            │
+└──────────┴──────────┴──────────┴───────────────────────┘
+         ↓           ↓           ↓              ↓
+┌─────────────────────────────────────────────────────────┐
+│         QUERY & PROCESSING LAYER                        │
+├──────────┬──────────┬──────────┬───────────────────────┤
+│   Trino  │  Spark   │  MLflow  │   Chat Service        │
+│  :8082   │  :8080   │  :5000   │      :8001            │
+└──────────┴──────────┴──────────┴───────────────────────┘
+         ↓           ↓           ↓              ↓
+┌─────────────────────────────────────────────────────────┐
+│         STORAGE & METADATA LAYER                        │
+├──────────┬──────────┬──────────┬───────────────────────┤
+│Delta Lake│   MinIO   │   MySQL  │      Qdrant          │
+│(Lakehouse)│ (S3)    │(Metadata)│   (Vector DB)        │
+└──────────┴──────────┴──────────┴───────────────────────┘
 ```
 
-### Medallion Architecture
+## 📋 Yêu cầu hệ thống
 
-| Layer | Mô tả | Số bảng |
-|-------|-------|---------|
-| **Bronze** | Raw data từ MySQL | 9 tables |
-| **Silver** | Cleaned & normalized data | 10 tables |
-| **Gold** | Star schema (Facts + Dimensions) | 10 tables |
-| **Platinum** | Business datamarts cho BI | 7 datamarts |
+- **Docker**: 20.10+ và Docker Compose 2.0+
+- **Disk Space**: Tối thiểu 20GB trống
+- **RAM**: Tối thiểu 8GB (khuyến nghị 16GB)
+- **OS**: Linux, macOS, hoặc Windows với WSL2
 
----
+## 🚀 Quick Start
 
-## 🛠️ Công nghệ sử dụng
-
-| **Thành phần** | **Công nghệ** | **Vai trò** |
-|----------------|---------------|-------------|
-| **Storage** | MinIO (S3-compatible) | Lưu trữ dữ liệu theo zone |
-| **Metadata** | Hive Metastore + MySQL | Quản lý schema và metadata |
-| **Compute** | Apache Spark 3.3.2 | Xử lý dữ liệu (ETL) |
-| **Lakehouse** | Delta Lake 2.3.0 | ACID transactions, versioning |
-| **Query Engine** | Trino 414 | SQL query trên Delta tables |
-| **Orchestration** | Dagster | Workflow management |
-| **BI/Visualization** | Metabase + Streamlit | Dashboard và báo cáo |
-| **Containerization** | Docker Compose | Triển khai và quản lý |
-
----
-
-## 🚀 Cài đặt và chạy
-
-### Yêu cầu hệ thống
-
-- Docker & Docker Compose
-- 8GB RAM trở lên
-- 20GB dung lượng trống
-
-### Quick Start (Automated Setup)
-
-**Recommended for first-time setup:**
+### 1. Clone repository
 
 ```bash
-# 1. Clone repository
 git clone <repository-url>
-cd Data_Warehouse_Fresh
+cd Data_lakehouse
+```
 
-# 2. Run automated setup script
-chmod +x setup.sh
+### 2. Download dataset (nếu chưa có)
+
+Dataset Brazilian E-commerce từ Kaggle:
+- URL: https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce
+- Đặt vào thư mục `brazilian-ecommerce/`
+
+### 3. Chạy setup tự động
+
+```bash
+# Quick setup (khuyến nghị cho lần đầu)
 ./setup.sh
+
+# Hoặc full setup với tùy chọn
+./full_setup.sh --fresh
 ```
 
-Script sẽ tự động:
-- ✅ Kiểm tra yêu cầu hệ thống (Docker, disk space, RAM)
-- ✅ Tạo file `.env` từ `env.example`
-- ✅ Download JAR dependencies
-- ✅ Build Docker images
-- ✅ Khởi động tất cả services
-- ✅ Tải dataset (nếu có)
-- ✅ Chạy ETL pipeline
-- ✅ Kiểm tra health của services
+### 4. Truy cập các services
 
-### Alternative Setup Methods
+Sau khi setup hoàn tất, truy cập:
 
-**Option 1: Using full_setup.sh**
-```bash
-chmod +x full_setup.sh
-./full_setup.sh --fresh    # Fresh install (remove volumes, rebuild all)
+- **Streamlit Dashboard**: http://localhost:8501
+- **Dagster UI**: http://localhost:3001
+- **Metabase BI**: http://localhost:3000
+- **Trino UI**: http://localhost:8082
+- **Spark Master**: http://localhost:8080
+- **MinIO Console**: http://localhost:9001 (minio/minio123)
+- **Chat Service API**: http://localhost:8001
+
+## 📦 Cấu trúc dự án
+
+```
+Data_lakehouse/
+├── app/                    # Streamlit UI application
+│   ├── app.py             # Main dashboard
+│   └── pages/             # Streamlit pages
+├── chat_service/          # FastAPI Chat Service
+│   ├── main.py           # API endpoints
+│   ├── skills/           # SQL generation skills
+│   └── llm/              # LLM integration
+├── etl_pipeline/         # Spark ETL jobs
+│   └── etl_pipeline/     # Dagster assets & jobs
+├── dagster/              # Dagster configuration
+├── docker-compose.yaml   # Service orchestration
+├── setup.sh              # Quick setup script
+├── full_setup.sh         # Full setup script
+└── env.example           # Environment template
 ```
 
-**Option 2: Manual setup**
-```bash
-# 1. Download JAR dependencies
-chmod +x download_jars.sh
-./download_jars.sh
-
-# 2. Create .env file
-cp env.example .env
-
-# 3. Start all services
-docker-compose up -d
-```
-
-**Note:** Cần chỉnh sửa `.env` file trước khi chạy để thêm Google API Key nếu muốn sử dụng Chat Service.
-
-### Kiểm tra trạng thái
-
-```bash
-# Kiểm tra containers
-docker-compose ps
-
-# Xem logs
-docker-compose logs -f [service_name]
-```
-
-### Truy cập các giao diện
-
-| Service | URL | Credentials / Notes |
-|---------|-----|---------------------|
-| **🚀 Streamlit App** | http://localhost:8501 | Main dashboard & UI |
-| **📊 Metabase BI** | http://localhost:3000 | Setup on first access |
-| **🎯 Dagster UI** | http://localhost:3001 | ETL orchestration |
-| **⚡ Spark Master** | http://localhost:8080 | Spark cluster UI |
-| **🪣 MinIO Console** | http://localhost:9001 | minio/minio123 |
-| **🔍 Trino** | http://localhost:8082 | SQL query engine |
-| **💬 Chat Service** | http://localhost:8001 | AI Chatbot API |
-
----
-
-## 📊 Dataset
-
-### Brazilian E-commerce Dataset
-
-- **Nguồn**: [Kaggle - Brazilian E-commerce Public Dataset](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce)
-- **Kích thước**: ~100K đơn hàng, 32K sản phẩm, 9K người bán
-- **Thời gian**: 2016-2018
-
-### Download Dataset
-
-```bash
-# Tạo thư mục dataset
-mkdir -p brazilian-ecommerce
-
-# Download từ Kaggle (cần Kaggle API)
-kaggle datasets download -d olistbr/brazilian-ecommerce -p brazilian-ecommerce/
-unzip brazilian-ecommerce/brazilian-ecommerce.zip -d brazilian-ecommerce/
-```
-
-### Schema
-
-| Table | Description | Key Fields |
-|-------|-------------|------------|
-| `customers` | Customer information | customer_id, customer_zip_code_prefix |
-| `orders` | Order details | order_id, customer_id, order_status |
-| `order_items` | Order line items | order_id, product_id, seller_id, price |
-| `products` | Product catalog | product_id, product_category_name |
-| `sellers` | Seller information | seller_id, seller_zip_code_prefix |
-| `geolocation` | Geographic data | geolocation_zip_code_prefix, city, state |
-| `order_payments` | Payment information | order_id, payment_type, payment_value |
-| `order_reviews` | Customer reviews | review_id, order_id, review_score |
-
----
-
-## 📈 Data Layers
-
-### Platinum Layer Datamarts
-
-| Datamart | Records | Mô Tả |
-|----------|---------|-------|
-| `dm_sales_monthly_category` | 1,326 | Doanh số theo tháng và danh mục sản phẩm |
-| `dm_seller_kpi` | 3,095 | KPI và hiệu suất của người bán |
-| `dm_customer_lifecycle` | 96,462 | Vòng đời và hành vi khách hàng |
-| `dm_payment_mix` | 90 | Phân tích phương thức thanh toán |
-| `dm_logistics_sla` | 574 | SLA và hiệu suất giao hàng |
-| `dm_product_bestsellers` | 32,951 | Sản phẩm bán chạy nhất |
-| `dm_category_price_bands` | 326 | Phân khúc giá theo danh mục |
-| **TỔNG** | **134,824** | **Tổng records trong Platinum Layer** |
-
-### ETL Pipeline
-
-1. **Bronze Layer**: Extract raw data từ MySQL → MinIO (Delta format)
-2. **Silver Layer**: Data cleaning, normalization, type casting
-3. **Gold Layer**: Star schema transformation (Facts + Dimensions)
-4. **Platinum Layer**: Business aggregations và datamarts cho BI
-
----
-
-## 🎨 Dashboard và BI
-
-### Metabase Setup
-
-1. Truy cập Metabase: http://localhost:3000
-2. Setup admin account (lần đầu tiên)
-3. Add Database:
-   - Database Type: **Trino**
-   - Host: `trino`
-   - Port: `8080`
-   - JDBC String: `catalog=minio&schema=platinum`
-   - Username: `metabase`
-   - SSL: **OFF**
-
-### Sample Queries
-
-#### Monthly Revenue Trend
-```sql
-SELECT 
-    year_month,
-    SUM(gmv) as total_revenue,
-    SUM(orders) as total_orders,
-    ROUND(SUM(gmv) / SUM(orders), 2) as aov
-FROM minio.platinum.dm_sales_monthly_category
-GROUP BY year_month
-ORDER BY year_month
-```
-
-#### Top 10 Categories
-```sql
-SELECT 
-    product_category_name_english as category,
-    SUM(gmv) as revenue,
-    SUM(orders) as orders,
-    SUM(units) as units
-FROM mino.platinum.dm_sales_monthly_category
-WHERE product_category_name_english IS NOT NULL
-GROUP BY product_category_name_english
-ORDER BY revenue DESC
-LIMIT 10
-```
-
-#### Payment Mix
-```sql
-SELECT 
-    payment_type,
-    SUM(orders) as total_orders,
-    SUM(payment_total) as total_value,
-    ROUND(SUM(orders) * 100.0 / SUM(SUM(orders)) OVER(), 2) as pct_orders
-FROM minio.platinum.dm_payment_mix
-WHERE payment_type IS NOT NULL
-GROUP BY payment_type
-ORDER BY total_orders DESC
-```
-
-### Recommended Dashboards
-
-1. **Executive Summary**: Total GMV, Orders, AOV, Revenue trend
-2. **Sales Deep Dive**: Category performance, Geographic distribution
-3. **Customer Analytics**: Lifecycle funnel, Segmentation, Cohort analysis
-4. **Operations**: Logistics SLA, Delivery metrics, Payment distribution
-5. **Product Intelligence**: Bestsellers, Price bands, Category analysis
-
-Xem chi tiết trong file `METABASE_SETUP_GUIDE.md` và `VISUALIZATION_RESULTS.md`.
-
----
-
-## 🧪 Testing
-
-### Test Spark ↔ MinIO Connection
-
-```bash
-python test_spark_minio_connection.py
-
-# Hoặc qua Docker
-docker exec spark-master python3 /opt/bitnami/spark/test_spark_minio_connection.py
-```
-
-### Test Trino Connection
-
-```bash
-chmod +x test_trino_connection.sh
-./test_trino_connection.sh
-```
-
-### Test SQL Queries
-
-```sql
--- Qua Trino CLI
-docker exec trino trino
-
--- Trong Trino CLI:
-SHOW CATALOGS;
-USE minio.platinum;
-SHOW TABLES;
-SELECT * FROM dm_sales_monthly_category LIMIT 10;
-```
-
----
-
-## 🔧 Configuration
+## 🔧 Cấu hình
 
 ### Environment Variables
 
-File `.env` được tạo tự động từ `env.example` khi khởi động. Các biến quan trọng:
+Copy `env.example` thành `.env` và cấu hình:
 
 ```bash
-# MySQL
-MYSQL_ROOT_PASSWORD=root123
-MYSQL_DATABASE=metastore
-MYSQL_USER=hive
-MYSQL_PASSWORD=hive
-
-# Dagster MySQL
-DAGSTER_MYSQL_HOSTNAME=de_mysql
-DAGSTER_MYSQL_DB=dagster
-DAGSTER_MYSQL_USERNAME=dagster
-DAGSTER_MYSQL_PASSWORD=dagster123
-
-# MinIO
-MINIO_ROOT_USER=minio
-MINIO_ROOT_PASSWORD=minio123
+cp env.example .env
 ```
 
-### Spark Configuration
+**Quan trọng**: Cập nhật `GOOGLE_API_KEY` trong `.env` để sử dụng Chat Service:
 
-Key settings trong `docker_image/spark/conf/spark-defaults.conf`:
-
-```properties
-# Delta Lake
-spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension
-spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog
-
-# S3/MinIO
-spark.hadoop.fs.s3a.endpoint=http://minio:9000
-spark.hadoop.fs.s3a.access.key=minio
-spark.hadoop.fs.s3a.secret.key=minio123
-spark.hadoop.fs.s3a.path.style.access=true
-
-# Lakehouse Storage
-spark.sql.warehouse.dir=s3a://lakehouse/
+```env
+GOOGLE_API_KEY=your_google_api_key_here
 ```
 
-### Trino Configuration
+### Các biến môi trường chính:
 
-Catalog `minio.properties`:
+- `MYSQL_ROOT_PASSWORD`: MySQL root password
+- `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`: MinIO credentials
+- `GOOGLE_API_KEY`: Google Gemini API key (cho Chat Service)
+- `LLM_API_KEY`: OpenAI API key (tùy chọn)
 
-```properties
-connector.name=delta_lake
-hive.metastore.uri=thrift://hive-metastore:9083
-hive.s3.endpoint=http://minio:9000
-hive.s3.aws-access-key=minio
-hive.s3.aws-secret-key=minio123
-hive.s3.path-style-access=true
-hive.s3.ssl.enabled=false
-delta.register-table-procedure.enabled=true
-```
+## 📊 Data Pipeline
 
----
+### Medallion Architecture
 
-## 🔄 Dagster Jobs
+1. **Bronze Layer**: Raw data từ MySQL
+2. **Silver Layer**: Cleaned & validated data
+3. **Gold Layer**: Star schema (fact & dimension tables)
+4. **Platinum Layer**: Business datamarts
 
-### Run ETL Pipeline
+### Chạy ETL
 
 ```bash
-# Access Dagster UI
-http://localhost:3001
+# Chạy ETL pipeline
+./full_setup.sh --etl
 
-# Materialize assets by layer:
-# - Bronze Layer: Extract from MySQL
-# - Silver Layer: Clean and normalize
-# - Gold Layer: Create star schema
-# - Platinum Layer: Create datamarts
-
-# Hoặc run via CLI
-docker exec de_dagster_daemon dagster job execute -j full_pipeline_job
+# Hoặc qua Dagster UI
+# Mở http://localhost:3001 và chạy job "reload_data"
 ```
 
----
+### Tối ưu hóa Lakehouse (Compaction & Vacuum)
 
-## 📚 Tài liệu tham khảo
+Hệ thống tự động chạy **OPTIMIZE** và **VACUUM** cho các bảng Delta Lake mỗi ngày lúc 3:00 AM (sau khi ETL hoàn thành).
 
-### Công nghệ chính
+#### Chạy thủ công
 
-- [Apache Spark Documentation](https://spark.apache.org/docs/latest/)
-- [Delta Lake Documentation](https://docs.delta.io/)
-- [Trino Documentation](https://trino.io/docs/)
-- [Dagster Documentation](https://docs.dagster.io/)
-- [Metabase Documentation](https://www.metabase.com/docs/)
-- [MinIO Documentation](https://min.io/docs/minio/linux/index.html)
+```bash
+# Chạy optimize script trực tiếp
+docker exec -it spark-master bash /scripts/optimize_lakehouse.sh
 
-### Modern Data Stack
+# Hoặc qua Dagster UI
+# Mở http://localhost:3001 và chạy job "optimize_lakehouse_job"
+```
 
-- [What is a Data Lakehouse?](https://www.databricks.com/discover/data-lakehouse)
-- [Medallion Architecture](https://www.databricks.com/glossary/medallion-architecture)
-- [Data Engineering Best Practices](https://github.com/datastacktv/data-engineer-roadmap)
+#### Tự động hóa
 
-### Dataset
+- **Schedule**: Chạy tự động mỗi ngày lúc 3:00 AM (sau ETL)
+- **Lớp được tối ưu**: Gold và Platinum
+- **Retention**: 168 giờ (7 ngày) - đúng chuẩn Delta Lake
+- **Chức năng**:
+  - **OPTIMIZE**: Gom các file nhỏ thành file lớn hơn (compaction)
+  - **VACUUM**: Xóa các file cũ không còn cần thiết
 
-- [Brazilian E-commerce Dataset](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce)
+#### Bảng được tối ưu
 
----
+**Gold Layer:**
+- `fact_order`
+- `fact_order_item`
+- `dim_customer`
+- `dim_product`
+- `dim_seller`
+
+**Platinum Layer:**
+- `dm_sales_monthly_category`
+- `dm_seller_kpi`
+- `dm_customer_lifecycle`
+- `dm_payment_mix`
+- `dm_logistics_sla`
+- `dm_product_bestsellers`
+- `dm_category_price_bands`
+- `forecast_monitoring`
+
+## 🛠️ Các lệnh hữu ích
+
+### Docker Compose
+
+```bash
+# Xem trạng thái services
+docker compose ps
+
+# Xem logs
+docker compose logs -f <service_name>
+
+# Restart service
+docker compose restart <service_name>
+
+# Stop tất cả
+docker compose down
+
+# Stop và xóa volumes
+docker compose down -v
+```
+
+### Makefile
+
+```bash
+# Build tất cả
+make build
+
+# Start services
+make up
+
+# Stop services
+make down
+
+# Rebuild và restart
+make rebuild
+```
 
 ## 🐛 Troubleshooting
 
-### Services không khởi động
+### Services không start
 
-```bash
-# Kiểm tra logs
-docker-compose logs [service_name]
+1. Kiểm tra logs: `docker compose logs <service_name>`
+2. Kiểm tra disk space: `df -h`
+3. Kiểm tra ports đang được sử dụng: `lsof -i :PORT`
 
-# Restart services
-docker-compose restart [service_name]
+### ETL pipeline fails
 
-# Rebuild nếu cần
-docker-compose down
-docker-compose build --no-cache
-docker-compose up -d
-```
+1. Kiểm tra MySQL connection: `docker exec de_mysql mysql -uroot -padmin123 -e "SHOW DATABASES;"`
+2. Kiểm tra Spark: http://localhost:8080
+3. Xem logs ETL: `docker compose logs etl_pipeline`
 
-### MinIO connection errors
+### Chat Service không hoạt động
 
-```bash
-# Kiểm tra MinIO
-docker exec minio mc ls minio/
+1. Kiểm tra GOOGLE_API_KEY trong `.env`
+2. Test API: `curl http://localhost:8001/healthz`
+3. Xem logs: `docker compose logs chat_service`
 
-# Test từ Spark
-docker exec spark-master python3 /opt/bitnami/spark/test_spark_minio_connection.py
-```
+## 📚 Tài liệu
 
-### Dagster job failures
+- [Chat Service Guide](docs/chat_service_guide.md)
+- [Data Dictionary](docs/data_dictionary.md)
+- [KPI Definitions](docs/kpi_definitions.md)
+- [Forecast Documentation](docs/forecast/README_forecast.md)
 
-```bash
-# Check Dagster logs
-docker-compose logs de_dagster_daemon
+## 🔒 Bảo mật
 
-# Check ETL pipeline logs
-docker-compose logs etl_pipeline
-```
+- **Không commit** file `.env` vào git
+- Đổi passwords mặc định trong production
+- Sử dụng environment variables cho API keys
+- Giới hạn network access trong docker-compose
 
----
+## 📝 License
 
-## 🤝 Đóng góp
+MIT License
 
-1. Fork repository
-2. Tạo feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to branch (`git push origin feature/AmazingFeature`)
-5. Tạo Pull Request
+## 👤 Author
 
----
+**Truong An**
 
-## 📄 License
+- Project Creator & Developer
+- Data Lakehouse - Modern Data Stack
+- License: MIT
 
-Distributed under the MIT License.
+> Thông tin tác giả cũng có thể được tìm thấy trong:
+> - `AUTHORS.md` - Chi tiết về tác giả
+> - `app/app.py` - Footer của Streamlit dashboard
+> - Git commit history (nếu có)
 
 ---
 
-## 👨‍💻 Tác giả
+**Happy Data Engineering! 🚀**
 
-**Truong An** - *Modern Data Stack Engineer*
-
----
-
-## 🙏 Acknowledgments
-
-- [Olist](https://olist.com/) for providing the Brazilian E-commerce dataset
-- [Apache Software Foundation](https://apache.org/) for open-source tools
-- [Modern Data Stack community](https://github.com/modern-data-stack) for inspiration
-
----
-
-⭐ **Nếu dự án này hữu ích, hãy cho một star!** ⭐

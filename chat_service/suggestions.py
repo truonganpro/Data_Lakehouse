@@ -226,6 +226,12 @@ def suggestions_for_non_sql(topic: str) -> List[str]:
             "Top sản phẩm bán chạy",
             "Kiến trúc hệ thống"
         ]
+    elif topic == "about_forecast_metric":
+        return [
+            "So sánh sMAPE của các model forecast?",
+            "Dự báo doanh thu 7 ngày tới?",
+            "Forecast accuracy metrics tháng vừa rồi?"
+        ]
     else:
         return [
             "Doanh thu 3 tháng gần đây",

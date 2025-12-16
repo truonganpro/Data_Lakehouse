@@ -21,7 +21,7 @@ def log_shape(context, df: DataFrame, name: str):
     },
     io_manager_key="spark_io_manager",
     compute_kind=COMPUTE_KIND,
-    key_prefix=[LAYER, "dmsalesmonthlycategory"],
+    key_prefix=[LAYER, "dm_sales_monthly_category"],
     group_name=LAYER,
 )
 def dm_sales_monthly_category(context, fact_order_item, dim_product, dim_product_category, dim_date):
@@ -51,7 +51,7 @@ def dm_sales_monthly_category(context, fact_order_item, dim_product, dim_product
     },
     io_manager_key="spark_io_manager",
     compute_kind=COMPUTE_KIND,
-    key_prefix=[LAYER, "dmsellerkpi"],
+    key_prefix=[LAYER, "dm_seller_kpi"],
     group_name=LAYER,
 )
 def dm_seller_kpi(context, fact_order_item, fact_order, fact_review, dim_seller):
@@ -101,7 +101,7 @@ def dm_seller_kpi(context, fact_order_item, fact_order, fact_review, dim_seller)
     },
     io_manager_key="spark_io_manager",
     compute_kind=COMPUTE_KIND,
-    key_prefix=[LAYER, "dmcustomerlifecycle"],
+    key_prefix=[LAYER, "dm_customer_lifecycle"],
     group_name=LAYER,
 )
 def dm_customer_lifecycle(context, fact_order_item, dim_customer, dim_date):
@@ -149,7 +149,7 @@ def dm_customer_lifecycle(context, fact_order_item, dim_customer, dim_date):
     },
     io_manager_key="spark_io_manager",
     compute_kind=COMPUTE_KIND,
-    key_prefix=[LAYER, "dmpaymentmix"],
+    key_prefix=[LAYER, "dm_payment_mix"],
     group_name=LAYER,
 )
 def dm_payment_mix(context, fact_payment, fact_order, dim_date):
@@ -177,7 +177,7 @@ def dm_payment_mix(context, fact_payment, fact_order, dim_date):
     },
     io_manager_key="spark_io_manager",
     compute_kind=COMPUTE_KIND,
-    key_prefix=[LAYER, "dmlogisticssla"],
+    key_prefix=[LAYER, "dm_logistics_sla"],
     group_name=LAYER,
 )
 def dm_logistics_sla(context, fact_order, dim_customer, dim_geolocation, dim_date):
@@ -206,7 +206,7 @@ def dm_logistics_sla(context, fact_order, dim_customer, dim_geolocation, dim_dat
     },
     io_manager_key="spark_io_manager",
     compute_kind=COMPUTE_KIND,
-    key_prefix=[LAYER, "dmproductbestsellers"],
+    key_prefix=[LAYER, "dm_product_bestsellers"],
     group_name=LAYER,
 )
 def dm_product_bestsellers(context, fact_order_item, fact_review, dim_product, dim_product_category):
@@ -251,7 +251,7 @@ def dm_product_bestsellers(context, fact_order_item, fact_review, dim_product, d
     },
     io_manager_key="spark_io_manager",
     compute_kind=COMPUTE_KIND,
-    key_prefix=[LAYER, "dmcategorypricebands"],
+    key_prefix=[LAYER, "dm_category_price_bands"],
     group_name=LAYER,
 )
 def dm_category_price_bands(context, fact_order_item, dim_product, dim_product_category):

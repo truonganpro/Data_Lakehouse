@@ -43,6 +43,15 @@ ABOUT_PROJECT_TRIGGERS = [
     "đồ án dùng", "project dùng", "stack nào"
 ]
 
+# About data stats triggers (table size, row count, metadata queries)
+ABOUT_DATA_STATS_TRIGGERS = [
+    "bảng nào lớn nhất", "bảng nào nhiều dòng", "table lớn nhất",
+    "top bảng theo số dòng", "top tables by rows", "largest tables",
+    "bảng nào có nhiều dòng nhất", "bảng lớn nhất về số dòng",
+    "table nào lớn nhất", "bảng nào nhiều rows nhất",
+    "top bảng", "bảng lớn", "largest table"
+]
+
 # Sentinel value for non-SQL responses
 NO_SQL = "__NO_SQL__"
 
@@ -102,11 +111,15 @@ def intent_to_sql(question: str) -> Tuple[Optional[str], Optional[Dict]]:
     if any(trigger in q for trigger in SMALLTALK_TRIGGERS):
         return NO_SQL, {"topic": "smalltalk"}
     
-    # 2. Check ABOUT_DATA triggers
+    # 2. Check ABOUT_DATA_STATS triggers (table size, row count queries) - HIGH PRIORITY
+    if any(trigger in q for trigger in ABOUT_DATA_STATS_TRIGGERS):
+        return NO_SQL, {"topic": "about_data_stats"}
+    
+    # 3. Check ABOUT_DATA triggers
     if any(trigger in q for trigger in ABOUT_DATA_TRIGGERS):
         return NO_SQL, {"topic": "about_data"}
     
-    # 3. Check ABOUT_PROJECT triggers
+    # 4. Check ABOUT_PROJECT triggers
     if any(trigger in q for trigger in ABOUT_PROJECT_TRIGGERS):
         return NO_SQL, {"topic": "about_project"}
     

@@ -31,7 +31,11 @@ class TopSellersSLASkill(BaseSkill):
         SELECT 
             s.seller_id,
             s.city_state AS region,
-            ROUND(100.0 * SUM(CASE WHEN f.delivered_on_time = 1 THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 2) AS ontime_rate_pct,
+            ROUND(
+                100.0 * SUM(CASE WHEN f.delivered_on_time THEN 1 ELSE 0 END)
+                / NULLIF(COUNT(*), 0),
+                2
+            ) AS ontime_rate_pct,
             COUNT(DISTINCT f.order_id) AS orders,
             SUM(f.sum_price + f.sum_freight) AS revenue
         FROM lakehouse.gold.fact_order f

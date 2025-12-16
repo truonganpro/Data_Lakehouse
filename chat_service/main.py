@@ -1,6 +1,10 @@
 """
 Chat Service API
 FastAPI service for SQL + RAG chatbot
+
+Author: Truong An
+Project: Data Lakehouse - Modern Data Stack
+License: MIT
 """
 import os
 import re
@@ -9,25 +13,35 @@ import uuid
 from typing import Optional, List, Set, Tuple, Dict, Union
 from datetime import datetime
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import trino
 from trino.dbapi import connect
+from trino.auth import BasicAuthentication
 from qdrant_client import QdrantClient
 from sqlalchemy import create_engine, text
 
 from sql_templates import intent_to_sql, get_safe_schemas, get_example_questions, NO_SQL
 from embeddings import embed_query
 from llm_sql import gen_sql_with_gemini
-from llm_summarize import format_answer, _parse_schema_from_sql
+from llm_summarize import format_answer, _parse_schema_from_sql, _explain_sql_and_lineage
 from router import get_router
 from errors import GuardError, GuardCode
+from guard.auto_fix import ensure_limit, add_default_time_filter
 from guard_message import message_and_suggestions
 from suggestions import suggestions_for, suggestions_for_non_sql
-from about_dataset_provider import get_about_dataset_card
+from about_dataset_provider import get_about_dataset_card, top_tables_by_rows
 from about_project_provider import get_about_project_card
 from session_store import get_session_context, update_session_context
+# Import from local modules (using relative imports since we're in /app)
+from llm.registry import generate_with_fallback
+from core.prompts import PROMPT_SQL, PROMPT_SUMMARY, PROMPT_EXPLAIN
+from schema_summary import build_schema_summary
+from guard.rate_limit import allow, get_remaining
+from guard.quick_actions import suggest_actions
+from metrics import record_request, record_rate_limit_block, get_metrics_prometheus
+from chat_logging import log_chat
 
 # SQL parsing for safety
 try:
@@ -39,25 +53,21 @@ except ImportError:
 
 
 # ============================================================================
-# Configuration
+# Configuration (import from core/config.py)
 # ============================================================================
 
-TRINO_HOST = os.getenv("TRINO_HOST", "trino")
-TRINO_PORT = int(os.getenv("TRINO_PORT", "8080"))
-TRINO_CATALOG = os.getenv("TRINO_CATALOG", "lakehouse")
-TRINO_DEFAULT_SCHEMA = os.getenv("TRINO_DEFAULT_SCHEMA", "gold")
-TRINO_USER = os.getenv("TRINO_USER", "chatbot")
-TRINO_PASSWORD = os.getenv("TRINO_PASSWORD", "")
-
-QDRANT_HOST = os.getenv("QDRANT_HOST", "qdrant")
-QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
-
-SQL_WHITELIST_SCHEMAS = set(os.getenv("SQL_WHITELIST_SCHEMAS", "gold,platinum").split(","))
-SQL_DEFAULT_LIMIT = int(os.getenv("SQL_DEFAULT_LIMIT", "200"))
-SQL_MAX_ROWS = int(os.getenv("SQL_MAX_ROWS", "5000"))
-SQL_TIMEOUT_SECS = int(os.getenv("SQL_TIMEOUT_SECS", "45"))
-
-LOG_DB_URI = os.getenv("LOG_DB_URI", "")
+# Import core config
+from core.config import (
+    TRINO_HOST, TRINO_PORT, TRINO_CATALOG, TRINO_DEFAULT_SCHEMA,
+    TRINO_USER, TRINO_PASSWORD,
+    QDRANT_HOST, QDRANT_PORT,
+    SQL_WHITELIST_SCHEMAS, SQL_DEFAULT_LIMIT, SQL_MAX_ROWS, SQL_TIMEOUT_SECS,
+    LOG_DB_URI,
+    RATE_LIMIT_ENABLED, RATE_LIMIT_WINDOW_S, RATE_LIMIT_MAX_REQ,
+    ENABLE_SUGGESTED_ACTIONS, ENABLE_EXPLANATION,
+    MAX_REQUEST_SIZE, CORS_ORIGINS,
+    ENABLE_METRICS, ENABLE_STRUCTURED_LOGS, ENABLE_TRACE_IDS
+)
 
 # Initialize clients
 qdrant_client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
@@ -81,14 +91,78 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# CORS
+# CORS (restrict to frontend domain)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
+    max_age=3600,
 )
+
+# Trace ID Middleware
+@app.middleware("http")
+async def trace_id_middleware(request: Request, call_next):
+    """Add trace ID to request and response"""
+    if ENABLE_TRACE_IDS:
+        trace_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex[:16]
+        request.state.trace_id = trace_id
+    else:
+        request.state.trace_id = None
+    response = await call_next(request)
+    if ENABLE_TRACE_IDS and hasattr(request.state, "trace_id") and request.state.trace_id:
+        response.headers["X-Request-ID"] = request.state.trace_id
+    return response
+
+# Request size limit middleware
+@app.middleware("http")
+async def request_size_limit(request: Request, call_next):
+    """Limit request body size"""
+    if request.method == "POST":
+        content_length = request.headers.get("content-length")
+        if content_length and int(content_length) > MAX_REQUEST_SIZE:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Request too large. Maximum size: {MAX_REQUEST_SIZE} bytes"
+            )
+    return await call_next(request)
+
+# Rate Limiting Middleware
+@app.middleware("http")
+async def rate_limiter(request: Request, call_next):
+    """Rate limiting middleware - block requests if over limit"""
+    if not RATE_LIMIT_ENABLED:
+        return await call_next(request)
+    
+    # Skip rate limiting for health checks and metrics
+    if request.url.path in ["/health", "/healthz", "/docs", "/openapi.json", "/metrics"]:
+        return await call_next(request)
+    
+    # Get client IP
+    client_ip = request.client.host if request.client else "unknown"
+    
+    # Check rate limit
+    if not allow(client_ip):
+        remaining = get_remaining(client_ip)
+        retry_after = RATE_LIMIT_WINDOW_S
+        record_rate_limit_block()
+        raise HTTPException(
+            status_code=429,
+            detail=f"Too Many Requests. Rate limit exceeded. Please try again later.",
+            headers={
+                "X-RateLimit-Remaining": "0",
+                "X-RateLimit-Limit": str(RATE_LIMIT_MAX_REQ),
+                "Retry-After": str(retry_after)
+            }
+        )
+    
+    # Add rate limit headers
+    remaining = get_remaining(client_ip)
+    response = await call_next(request)
+    response.headers["X-RateLimit-Remaining"] = str(remaining)
+    response.headers["X-RateLimit-Limit"] = str(RATE_LIMIT_MAX_REQ)
+    return response
 
 
 # ============================================================================
@@ -99,6 +173,13 @@ class AskRequest(BaseModel):
     session_id: Optional[str] = None
     question: str
     prefer_sql: Optional[bool] = True
+    explain: Optional[bool] = False  # Toggle for SQL explanation
+
+
+class QueryRequest(BaseModel):
+    sql: str
+    limit: Optional[int] = None
+    explain: Optional[bool] = False  # Toggle for SQL explanation
 
 
 class AskResponse(BaseModel):
@@ -109,6 +190,8 @@ class AskResponse(BaseModel):
     citations: Optional[List[dict]] = None
     execution_time_ms: Optional[int] = None
     suggestions: Optional[List[str]] = None  # Context-aware suggestions
+    explanation: Optional[str] = None  # SQL explanation and lineage
+    suggested_actions: Optional[List[dict]] = None  # Quick actions for guardrails
 
 
 # ============================================================================
@@ -380,13 +463,6 @@ def enforce_sql_safety(sql: str, raise_guard_error: bool = True) -> str:
             detail="SELECT * is not allowed for safety"
         )
     
-    # Check for missing time predicate on large fact tables
-    if _check_missing_time_predicate(sql):
-        if raise_guard_error:
-            raise GuardError(GuardCode.MISSING_TIME_PRED, "Large fact tables require time predicate")
-        # Don't raise error here, just warn (allow queries without time filter for small tables)
-        print("⚠️  Warning: Query on large fact table without time predicate")
-    
     # Check whitelist schemas using AST (more accurate)
     schemas = _parse_sql_schemas(sql)
     has_safe_schema = bool(schemas.intersection(SQL_WHITELIST_SCHEMAS))
@@ -399,16 +475,27 @@ def enforce_sql_safety(sql: str, raise_guard_error: bool = True) -> str:
             detail=f"Query must use one of these schemas: {', '.join(SQL_WHITELIST_SCHEMAS)}"
         )
     
-    # Check for LIMIT (outermost)
-    # Note: We check before adding LIMIT to detect if user forgot it
+    # Auto-fix: Add time filter for large fact tables if missing
+    # Check before applying auto-fix
+    issues_to_fix = []
+    if _check_missing_time_predicate(sql):
+        issues_to_fix.append(GuardCode.MISSING_TIME_PRED)
+    
+    # Auto-fix: Add LIMIT if missing
     sql_upper = sql.upper()
     has_limit = bool(re.search(r"\bLIMIT\s+\d+\b", sql_upper))
-    
-    # Only enforce LIMIT if missing (but don't raise error, just add it)
-    # We'll raise error only if user explicitly requests without LIMIT
     if not has_limit:
-        # Add LIMIT automatically (don't raise error for this)
-        sql = f"{sql.rstrip(';')} LIMIT {SQL_DEFAULT_LIMIT}"
+        issues_to_fix.append(GuardCode.MISSING_LIMIT)
+    
+    # Apply auto-fixes (instead of raising errors)
+    if issues_to_fix:
+        if GuardCode.MISSING_TIME_PRED in issues_to_fix:
+            sql = add_default_time_filter(sql, months=3)
+            print(f"✅ Auto-fixed: Added default time filter (last 3 months)")
+        
+        if GuardCode.MISSING_LIMIT in issues_to_fix:
+            sql = ensure_limit(sql, default_limit=SQL_DEFAULT_LIMIT)
+            print(f"✅ Auto-fixed: Added LIMIT {SQL_DEFAULT_LIMIT}")
     
     return sql
 
@@ -496,6 +583,8 @@ def run_sql(sql: str, schema: str = TRINO_DEFAULT_SCHEMA, check_empty: bool = Fa
             catalog=TRINO_CATALOG,
             schema=schema,
             http_scheme="http",
+            auth=None if not TRINO_PASSWORD else BasicAuthentication(TRINO_USER, TRINO_PASSWORD),
+            source="chat-service"
         ) as conn:
             cur = conn.cursor()
             
@@ -567,6 +656,51 @@ def build_sql(question: str) -> Tuple[Optional[str], Optional[Dict]]:
     """
     q_lower = question.lower().strip()
     
+    # 0. PRIORITY: Check for forecast metric/concept questions FIRST (before smalltalk)
+    # These are questions about definitions, not data queries - should use RAG + LLM
+    # Pattern 1: Exact matches for "X là gì" or "X nghĩa là"
+    has_forecast_metric_question = any(
+        kw in q_lower
+        for kw in [
+            "smape là gì",
+            "mae là gì",
+            "rmse là gì",
+            "mape là gì",
+            "ci coverage là gì",
+            "yhat_lo là gì",
+            "yhat_hi là gì",
+            "yhat là gì",
+            "forecast metric",
+            "forecast accuracy",
+            "độ chính xác dự báo",
+            "smape bao nhiêu",
+            "mae bao nhiêu",
+            "rmse bao nhiêu",
+            "smape tốt",
+            "mae tốt",
+            "rmse tốt",
+            "smape nghĩa là",
+            "mae nghĩa là",
+            "rmse nghĩa là",
+            "đánh giá chất lượng forecast",
+            "đánh giá chất lượng dự báo",
+            "forecast monitoring",
+            "backtest đo",
+            "ý nghĩa của",  # "Ý nghĩa của CI width?"
+        ]
+    ) or (
+        # Pattern 2: Metric keyword + question words (conceptual question)
+        any(kw in q_lower for kw in ["smape", "mae", "rmse", "mape", "ci coverage", "yhat_lo", "yhat_hi", "forecast accuracy", "forecast metric", "ci width", "ci interval"])
+        and any(kw in q_lower for kw in ["là gì", "nghĩa là", "định nghĩa", "bao nhiêu", "tốt", "what is", "meaning", "đánh giá", "chất lượng", "ý nghĩa"])
+        # BUT NOT data query keywords (to distinguish from ForecastMetricsSkill)
+        and not any(kw in q_lower for kw in ["so sánh", "compare", "của các model", "tháng", "month", "năm", "year", "trung bình", "average", "tổng", "sum"])
+    )
+    
+    # If it's a forecast metric question (conceptual, not data query), use RAG + LLM
+    if has_forecast_metric_question:
+        print(f"✅ Detected forecast metric question: {question}")
+        return NO_SQL, {"topic": "about_forecast_metric"}
+    
     # 1. Quick check for non-SQL modes (smalltalk, about_data, about_project)
     # Use direct check instead of intent_to_sql to avoid legacy template matching
     from sql_templates import SMALLTALK_TRIGGERS, ABOUT_DATA_TRIGGERS, ABOUT_PROJECT_TRIGGERS, HELP_TRIGGERS
@@ -577,7 +711,19 @@ def build_sql(question: str) -> Tuple[Optional[str], Optional[Dict]]:
         if is_personal or not _has_data_entities_in_question(question):
             return NO_SQL, {"topic": "smalltalk"}
     
-    if any(trigger in q_lower for trigger in ABOUT_DATA_TRIGGERS):
+    # Chặn intent "about dataset" không bắt các câu có từ khóa forecast
+    # Mọi câu có từ khóa forecast thì luôn ưu tiên đi qua router/skills
+    has_forecast_kw = any(kw in q_lower for kw in ["dự báo", "forecast", "horizon", "ci ", "kịch bản", 
+                                                    "smape", "mae", "rmse", "monitoring", "backtest",
+                                                    "yhat", "yhat_lo", "yhat_hi", "planning"])
+    
+    # Check ABOUT_DATA_STATS triggers first (table size queries)
+    from sql_templates import ABOUT_DATA_STATS_TRIGGERS
+    if any(trigger in q_lower for trigger in ABOUT_DATA_STATS_TRIGGERS):
+        return NO_SQL, {"topic": "about_data_stats"}
+    
+    # Chỉ check ABOUT_DATA_TRIGGERS nếu KHÔNG có từ khóa forecast
+    if not has_forecast_kw and any(trigger in q_lower for trigger in ABOUT_DATA_TRIGGERS):
         return NO_SQL, {"topic": "about_data"}
     
     if any(trigger in q_lower for trigger in ABOUT_PROJECT_TRIGGERS):
@@ -617,12 +763,30 @@ def build_sql(question: str) -> Tuple[Optional[str], Optional[Dict]]:
         print(f"✅ Using legacy template SQL for: {question}")
         return sql, None
     
-    # 4. Fallback to Gemini LLM (for complex queries)
-    if os.getenv("LLM_PROVIDER", "none").lower() == "gemini":
-        print(f"🤖 Falling back to Gemini for: {question}")
-        sql = gen_sql_with_gemini(question)
+    # 4. Fallback to LLM (pluggable provider: Gemini/OpenAI)
+    print(f"🤖 Falling back to LLM for: {question}")
+    try:
+        # Build prompt with schema summary injected
+        schema_summary = build_schema_summary()
+        full_prompt = PROMPT_SQL.format(
+            schema_summary=schema_summary,
+            question=question
+        )
+        
+        sql = generate_with_fallback(
+            prompt=full_prompt,
+            kind="sql",
+            system=None  # Full prompt already includes everything
+        )
         if sql:
             return sql, None
+    except Exception as e:
+        print(f"⚠️  LLM generation error: {e}")
+        # Fallback to legacy Gemini if available
+        if os.getenv("LLM_PROVIDER", "none").lower() == "gemini":
+            sql = gen_sql_with_gemini(question)
+            if sql:
+                return sql, None
     
     # 5. No SQL generated
     return None, None
@@ -698,7 +862,7 @@ def log_conversation(session_id: str, role: str, content: str):
         print(f"⚠️  Logging error: {e}")
 
 
-def log_sql_execution(session_id: str, sql: str, rowcount: int, duration_ms: int, error: str = None):
+def log_sql_execution(session_id: str, sql: str, rowcount: int, duration_ms: int, error: str = None, trace_id: str = None):
     """Log SQL execution with masked literals for privacy"""
     if not log_engine:
         return
@@ -725,6 +889,19 @@ def log_sql_execution(session_id: str, sql: str, rowcount: int, duration_ms: int
             conn.commit()
     except Exception as e:
         print(f"⚠️  SQL logging error: {e}")
+    
+    # Also log to console if structured logging is enabled
+    if ENABLE_STRUCTURED_LOGS:
+        log_entry = {
+            "timestamp": datetime.now().isoformat(),
+            "session_id": session_id,
+            "trace_id": trace_id,
+            "rowcount": rowcount,
+            "duration_ms": duration_ms,
+            "error": error is not None,
+            "sql_hash": hash(safe_sql) if 'safe_sql' in locals() else None
+        }
+        print(f"📊 SQL Execution: {log_entry}")
 
 
 # ============================================================================
@@ -732,14 +909,51 @@ def log_sql_execution(session_id: str, sql: str, rowcount: int, duration_ms: int
 # ============================================================================
 
 @app.get("/health")
+@app.get("/healthz")  # Thêm alias /healthz
 def health_check():
-    """Health check endpoint"""
+    """Health check endpoint - kiểm tra kết nối Trino và Qdrant"""
+    # Simple health check - verify connections
+    trino_ok = False
+    qdrant_ok = False
+    
+    try:
+        # Quick Trino connection test
+        with connect(
+            host=TRINO_HOST,
+            port=TRINO_PORT,
+            user=TRINO_USER,
+            catalog=TRINO_CATALOG,
+            http_scheme="http",
+            auth=None if not TRINO_PASSWORD else BasicAuthentication(TRINO_USER, TRINO_PASSWORD),
+            source="health-check"
+        ) as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT 1")
+            trino_ok = True
+    except Exception as e:
+        print(f"⚠️  Trino health check failed: {e}")
+    
+    try:
+        # Quick Qdrant connection test
+        collections = qdrant_client.get_collections()
+        qdrant_ok = True
+    except Exception as e:
+        print(f"⚠️  Qdrant health check failed: {e}")
+    
+    status = "healthy" if (trino_ok and qdrant_ok) else "degraded"
+    
     return {
-        "status": "healthy",
+        "status": status,
         "timestamp": datetime.utcnow().isoformat(),
         "services": {
-            "trino": f"{TRINO_HOST}:{TRINO_PORT}",
-            "qdrant": f"{QDRANT_HOST}:{QDRANT_PORT}",
+            "trino": {
+                "host": f"{TRINO_HOST}:{TRINO_PORT}",
+                "status": "ok" if trino_ok else "error"
+            },
+            "qdrant": {
+                "host": f"{QDRANT_HOST}:{QDRANT_PORT}",
+                "status": "ok" if qdrant_ok else "error"
+            }
         }
     }
 
@@ -752,8 +966,119 @@ def get_examples():
     }
 
 
+@app.get("/metrics")
+def metrics_endpoint():
+    """Prometheus metrics endpoint"""
+    if not ENABLE_METRICS:
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"message": "Metrics disabled"})
+    from fastapi.responses import PlainTextResponse
+    return PlainTextResponse(get_metrics_prometheus(), media_type="text/plain")
+
+
+@app.post("/query")
+def run_query(request: QueryRequest, http_request: Request = None):
+    """
+    Run SQL query directly (with optional explanation)
+    
+    Args:
+        request: QueryRequest with SQL and optional explain flag
+        http_request: HTTP request object (for trace ID)
+    
+    Returns:
+        Query results with optional explanation
+    """
+    sql = request.sql.strip()
+    limit = request.limit or SQL_DEFAULT_LIMIT
+    explain = request.explain or False
+    
+    if not sql:
+        raise HTTPException(status_code=400, detail="SQL cannot be empty")
+    
+    # Get trace ID if available
+    trace_id = getattr(http_request.state, "trace_id", None) if http_request and hasattr(http_request, "state") else None
+    
+    # Execute SQL
+    start_time = time.time()
+    try:
+        # run_sql returns (result: List[Dict], execution_time_ms: int)
+        result, exec_time = run_sql(sql)
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        
+        # result is already a list of dicts, extract columns from first row if available
+        rows_preview = result
+        cols = list(rows_preview[0].keys()) if rows_preview and len(rows_preview) > 0 else []
+        
+        # Generate explanation if requested and enabled
+        explanation = None
+        if ENABLE_EXPLANATION and explain:
+            source_schema = _parse_schema_from_sql(sql)
+            explanation = _explain_sql_and_lineage(sql, source_schema, rows_preview)
+        
+        # Log execution
+        log_sql_execution("query", sql, len(rows_preview), execution_time_ms, error=None, trace_id=trace_id)
+        
+        # Record metrics
+        record_request("/query", 200, execution_time_ms, len(rows_preview), error=False)
+        
+        return {
+            "columns": cols,
+            "rows": rows_preview,
+            "execution_time_ms": execution_time_ms,
+            "explanation": explanation if ENABLE_EXPLANATION else None
+        }
+    except HTTPException as e:
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        log_sql_execution("query", sql, 0, execution_time_ms, error=str(e.detail), trace_id=trace_id)
+        record_request("/query", e.status_code, execution_time_ms, 0, error=True)
+        raise
+    except Exception as e:
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        log_sql_execution("query", sql, 0, execution_time_ms, error=str(e), trace_id=trace_id)
+        record_request("/query", 500, execution_time_ms, 0, error=True)
+        raise HTTPException(status_code=500, detail=f"SQL execution error: {str(e)}")
+
+
+@app.post("/explain")
+def explain_sql_endpoint(request: Dict, http_request: Request = None):
+    """
+    Explain SQL query (lineage, measures, dimensions)
+    
+    Args:
+        request: Dict with 'sql' key
+        http_request: HTTP request object (for trace ID)
+    
+    Returns:
+        Explanation text
+    """
+    sql = request.get("sql", "").strip()
+    if not sql:
+        raise HTTPException(status_code=400, detail="SQL cannot be empty")
+    
+    # Get trace ID if available
+    trace_id = getattr(http_request.state, "trace_id", None) if http_request and hasattr(http_request, "state") else None
+    
+    start_time = time.time()
+    try:
+        source_schema = _parse_schema_from_sql(sql)
+        explanation = _explain_sql_and_lineage(sql, source_schema, None)
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        
+        # Record metrics
+        record_request("/explain", 200, execution_time_ms, 0, error=False)
+        
+        return {
+            "sql": sql,
+            "explanation": explanation
+        }
+    except Exception as e:
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        record_request("/explain", 500, execution_time_ms, 0, error=True)
+        raise HTTPException(status_code=500, detail=f"Explanation error: {str(e)}")
+
+
 @app.post("/ask", response_model=AskResponse)
-def ask(request: AskRequest):
+def ask(request: AskRequest, http_request: Request = None):
     """
     Main chat endpoint with Gemini integration + HELP MODE
     
@@ -770,6 +1095,12 @@ def ask(request: AskRequest):
     
     if not question:
         raise HTTPException(status_code=400, detail="Question cannot be empty")
+    
+    # Get trace ID if available
+    trace_id = getattr(http_request.state, "trace_id", None) if http_request and hasattr(http_request, "state") else None
+    
+    # Start timing
+    start_time = time.time()
     
     # Log user question
     log_conversation(session_id, "user", question)
@@ -789,27 +1120,128 @@ def ask(request: AskRequest):
     session_context = get_session_context(session_id)
     
     # 1. Generate SQL (or detect non-SQL modes)
-    if request.prefer_sql:
-        sql_query, metadata = build_sql(question)
-        
-        # Store metadata for suggestions
-        if metadata:
-            if sql_query and sql_query != NO_SQL and sql_query != "":
-                # SQL was generated, metadata is from router/skill
-                skill_metadata = metadata
-            else:
-                # Non-SQL mode, metadata is from intent_to_sql
-                non_sql_metadata = metadata
-        elif sql_query and sql_query != NO_SQL and sql_query != "":
-            # SQL generated but no metadata (legacy template)
-            skill_metadata = {}
-        
-        # 1a. Non-SQL modes (smalltalk, about_data, about_project)
-        if sql_query == NO_SQL:
-            topic = metadata.get("topic") if metadata else "unknown"
+    # Always call build_sql to detect non-SQL modes, regardless of prefer_sql
+    sql_query, metadata = build_sql(question)
+    
+    # Store metadata for suggestions
+    if metadata:
+        if sql_query and sql_query != NO_SQL and sql_query != "":
+            # SQL was generated, metadata is from router/skill
+            skill_metadata = metadata
+        else:
+            # Non-SQL mode, metadata is from intent_to_sql
             non_sql_metadata = metadata
+    elif sql_query and sql_query != NO_SQL and sql_query != "":
+        # SQL generated but no metadata (legacy template)
+        skill_metadata = {}
+    
+    # 1a. Non-SQL modes (smalltalk, about_data, about_project, about_forecast_metric)
+    # Handle these BEFORE checking prefer_sql, as they don't need SQL
+    if sql_query == NO_SQL:
+        topic = metadata.get("topic") if metadata else "unknown"
+        non_sql_metadata = metadata
+        
+        print(f"💬 Non-SQL mode detected: topic={topic} for question: {question}")
+        
+        # PRIORITY: about_forecast_metric (conceptual questions about forecast metrics)
+        if topic == "about_forecast_metric":
+            # Use RAG + LLM to answer conceptual questions about forecast metrics
+            print(f"🔍 Searching RAG for forecast metric question: {question}")
+            citations = rag_search(question, k=4)
+            print(f"✅ Found {len(citations) if citations else 0} citations from RAG")
             
-            if topic == "smalltalk":
+            # Generate answer using LLM with RAG context
+            from llm_summarize import summarize_docs_with_llm
+            answer = summarize_docs_with_llm(question, citations)
+            
+            # Fallback if LLM fails: try to extract answer directly from citations
+            if not answer:
+                print(f"⚠️  LLM failed to generate answer, trying to extract from citations")
+                
+                # Try to find relevant information in citations
+                q_lower = question.lower()
+                answer_parts = []
+                
+                # Check for sMAPE questions
+                if "smape" in q_lower:
+                    for cite in citations:
+                        text = cite.get('text', '').lower()
+                        if 'smape' in text or 'symmetric mean absolute percentage error' in text:
+                            # Extract relevant parts
+                            if '20%' in text or '30%' in text or '40%' in text:
+                                answer_parts.append(
+                                    "**sMAPE (Symmetric Mean Absolute Percentage Error)** là một metric đo độ chính xác của forecast.\n\n"
+                                    "**Ngưỡng đánh giá:**\n"
+                                    "  • < 20%: Rất tốt\n"
+                                    "  • 20-30%: Tốt\n"
+                                    "  • 30-40%: Trung bình\n"
+                                    "  • > 40%: Cần cải thiện\n\n"
+                                    f"(Nguồn: {cite.get('source', 'forecast documentation')})"
+                                )
+                                break
+                
+                # Check for MAE questions
+                elif "mae" in q_lower and "mean absolute error" not in q_lower:
+                    answer_parts.append(
+                        "**MAE (Mean Absolute Error)** là metric đo độ lệch trung bình giữa giá trị dự báo và giá trị thực tế.\n\n"
+                        "MAE càng nhỏ thì forecast càng chính xác.\n\n"
+                        "(Thông tin chi tiết có trong tài liệu forecast)"
+                    )
+                
+                # Check for RMSE questions
+                elif "rmse" in q_lower:
+                    answer_parts.append(
+                        "**RMSE (Root Mean Squared Error)** là metric đo độ lệch bình phương trung bình giữa giá trị dự báo và giá trị thực tế.\n\n"
+                        "RMSE càng nhỏ thì forecast càng chính xác. RMSE thường lớn hơn MAE vì nó phạt nặng hơn các lỗi lớn.\n\n"
+                        "(Thông tin chi tiết có trong tài liệu forecast)"
+                    )
+                
+                # Check for CI coverage questions
+                elif "ci coverage" in q_lower or "ci width" in q_lower:
+                    answer_parts.append(
+                        "**CI Coverage (Confidence Interval Coverage)** là tỷ lệ giá trị thực tế nằm trong khoảng confidence interval (yhat_lo, yhat_hi) của forecast.\n\n"
+                        "CI Coverage càng gần 95% (nếu dùng 95% CI) thì forecast càng đáng tin cậy.\n\n"
+                        "(Thông tin chi tiết có trong tài liệu forecast)"
+                    )
+                
+                # Generic fallback
+                if not answer_parts:
+                    answer = (
+                        f"Tôi không thể tìm thấy thông tin chi tiết về '{question}' trong tài liệu hiện tại.\n\n"
+                        "💡 **Gợi ý:**\n"
+                        "  • Thử hỏi: \"sMAPE là gì?\" hoặc \"MAE là gì?\"\n"
+                        "  • Hoặc hỏi về dữ liệu: \"So sánh sMAPE của các model forecast?\"\n"
+                    )
+                else:
+                    answer = "\n\n".join(answer_parts)
+                    print(f"✅ Extracted answer from citations ({len(answer)} chars)")
+            else:
+                print(f"✅ Generated answer from RAG + LLM ({len(answer)} chars)")
+            
+            # Build citations for display
+            citations_display = [
+                {
+                    "doc_id": cite.get("doc_id", ""),
+                    "score": cite.get("score", 0.0),
+                    "text": cite.get("text", "")[:200],
+                    "source": cite.get("source", "unknown"),
+                }
+                for cite in citations
+            ] if citations else None
+            
+            log_conversation(session_id, "assistant", answer)
+            
+            return AskResponse(
+                session_id=session_id,
+                answer=answer,
+                sql=None,
+                rows_preview=None,
+                citations=citations_display,
+                execution_time_ms=int((time.time() - start_time) * 1000),
+                suggestions=suggestions_for_non_sql(topic)
+            )
+        
+        if topic == "smalltalk":
                 # Check if it's a personal question
                 q_lower = question.lower()
                 is_personal = any(kw in q_lower for kw in ["bạn là ai", "tôi là ai", "bạn biết tôi", "who are you", "who am i", "what is your name", "tên bạn"])
@@ -870,34 +1302,121 @@ def ask(request: AskRequest):
                             "  • \"Phân bố đơn hàng theo bang?\"\n\n"
                             "Hãy hỏi mình bất kỳ câu hỏi nào về dữ liệu! 🚀"
                         )
-            elif topic == "about_data":
-                # Use provider to get dynamic dataset info from metadata
-                try:
-                    answer = get_about_dataset_card()
-                except Exception as e:
-                    print(f"⚠️  Error getting dataset card: {e}")
-                    # Fallback to static response
+        elif topic == "about_data_stats":
+            # Handle table size/row count queries from metadata
+            from about_dataset_provider import top_tables_by_rows
+            try:
+                rows = top_tables_by_rows(5)
+                if not rows:
+                    # No metadata available
                     answer = (
-                        "**📊 Dữ liệu TMĐT Brazil (Olist E-commerce Dataset)**\n\n"
-                        "**📈 Quy mô dữ liệu:**\n"
-                        "  • **Orders**: ~100,000 đơn hàng\n"
-                        "  • **Products**: ~32,000 sản phẩm\n"
-                        "  • **Sellers**: ~3,000 nhà bán\n"
-                        "  • **Customers**: ~100,000 khách hàng\n\n"
-                        "**📅 Thời gian:**\n"
-                        "  • **Phạm vi**: 2016-09-04 đến 2018-10-17\n"
-                        "  • **Loại**: Batch data (không realtime)\n\n"
-                        "**💡 Lưu ý**: Dữ liệu batch nên số liệu ổn định, không realtime."
+                        "Chưa có metadata `platinum_sys.data_catalog` để thống kê bảng theo số dòng.\n\n"
+                        "💡 **Gợi ý:**\n"
+                        "  • Cập nhật metadata lakehouse\n"
+                        "  • Liệt kê bảng platinum\n"
+                        "  • Dataset của mình là gì?"
                     )
-            elif topic == "about_project":
-                # Use provider to get project architecture info
-                answer = get_about_project_card()
-            else:
-                answer = "Xin chào! Mình có thể giúp gì cho bạn?"
-            
-            # Get suggestions for non-SQL responses
-            suggestions = suggestions_for_non_sql(topic)
-            
+                    suggestions = [
+                        "cập nhật metadata lakehouse",
+                        "liệt kê bảng platinum",
+                        "dataset của mình là gì?"
+                    ]
+                else:
+                    # Format summary
+                    largest = rows[0]
+                    summary = (
+                        f"**Bảng lớn nhất**: `{largest.get('schema', 'N/A')}.{largest.get('table', 'N/A')}` "
+                        f"({largest.get('row_count', 0):,} dòng). "
+                        f"Top {len(rows)} bảng hiển thị bên dưới."
+                    )
+                    
+                    # Format table info
+                    table_rows = []
+                    for table in rows:
+                        schema = table.get('schema', 'N/A')
+                        table_name = table.get('table', 'N/A')
+                        row_count = table.get('row_count', 0)
+                        bytes_info = table.get('bytes')
+                        num_files = table.get('num_files')
+                        
+                        row_info = f"  • `{schema}.{table_name}`: **{row_count:,}** dòng"
+                        if bytes_info:
+                            mb = bytes_info / (1024 * 1024)
+                            row_info += f" (~{mb:.1f} MB)"
+                        if num_files:
+                            row_info += f" ({num_files} files)"
+                        table_rows.append(row_info)
+                    
+                    answer = (
+                        "🗂️ **Nguồn**: `lakehouse.platinum_sys.data_catalog` • "
+                        "📦 Dữ liệu batch (2016–2018)\n\n"
+                        f"{summary}\n\n"
+                        "**📊 Top bảng theo số dòng:**\n"
+                        + "\n".join(table_rows)
+                    )
+                    suggestions = [
+                        "bảng nào lớn nhất về dung lượng?",
+                        "datamart platinum nào được dùng nhiều?",
+                        "dataset của mình là gì?"
+                    ]
+                
+                log_conversation(session_id, "assistant", answer)
+                
+                return AskResponse(
+                    session_id=session_id,
+                    answer=answer,
+                    sql=None,
+                    rows_preview=rows if rows else None,
+                    citations=None,
+                    execution_time_ms=0,
+                    suggestions=suggestions
+                )
+            except Exception as e:
+                print(f"⚠️  Error getting top tables: {e}")
+                answer = (
+                    "⚠️ Không thể truy vấn metadata lúc này.\n\n"
+                    "💡 **Gợi ý:**\n"
+                    "  • Dataset của mình là gì?\n"
+                    "  • Đồ án dùng công nghệ gì?\n"
+                    "  • Doanh thu theo tháng gần đây?"
+                )
+                suggestions = [
+                    "dataset của mình là gì?",
+                    "đồ án dùng công nghệ gì?",
+                    "doanh thu theo tháng gần đây?"
+                ]
+                log_conversation(session_id, "assistant", answer)
+                return AskResponse(
+                    session_id=session_id,
+                    answer=answer,
+                    sql=None,
+                    rows_preview=None,
+                    citations=None,
+                    execution_time_ms=0,
+                    suggestions=suggestions
+                )
+        elif topic == "about_data":
+            # Use provider to get dynamic dataset info from metadata
+            try:
+                answer = get_about_dataset_card()
+            except Exception as e:
+                print(f"⚠️  Error getting dataset card: {e}")
+                # Fallback to static response
+                answer = (
+                    "**📊 Dữ liệu TMĐT Brazil (Olist E-commerce Dataset)**\n\n"
+                    "**📈 Quy mô dữ liệu:**\n"
+                    "  • **Orders**: ~100,000 đơn hàng\n"
+                    "  • **Products**: ~32,000 sản phẩm\n"
+                    "  • **Sellers**: ~3,000 nhà bán\n"
+                    "  • **Customers**: ~100,000 khách hàng\n\n"
+                    "**📅 Thời gian:**\n"
+                    "  • **Phạm vi**: 2016-09-04 đến 2018-10-17\n"
+                    "  • **Loại**: Batch data (không realtime)\n\n"
+                    "**💡 Lưu ý**: Dữ liệu batch nên số liệu ổn định, không realtime."
+                )
+        elif topic == "about_project":
+            # Use provider to get project architecture info
+            answer = get_about_project_card()
             log_conversation(session_id, "assistant", answer)
             
             return AskResponse(
@@ -907,8 +1426,27 @@ def ask(request: AskRequest):
                 rows_preview=None,
                 citations=None,
                 execution_time_ms=0,
-                suggestions=suggestions
+                suggestions=suggestions_for_non_sql(topic)
             )
+        
+        
+        else:
+            answer = "Xin chào! Mình có thể giúp gì cho bạn?"
+        
+        # Get suggestions for non-SQL responses
+        suggestions = suggestions_for_non_sql(topic)
+        
+        log_conversation(session_id, "assistant", answer)
+        
+        return AskResponse(
+            session_id=session_id,
+            answer=answer,
+            sql=None,
+            rows_preview=None,
+            citations=None,
+            execution_time_ms=0,
+            suggestions=suggestions
+        )
         
         # 1b. HELP MODE - return suggestions instead of error
         if sql_query == "":
@@ -962,27 +1500,36 @@ def ask(request: AskRequest):
                 execution_time_ms=0
             )
         
-        # 1c. SQL generated - execute it
-        # Only execute if sql_query is a valid SQL string (not NO_SQL, not "", not None)
-        if sql_query and sql_query != NO_SQL and sql_query != "":
+    # 1c. SQL generated - execute it (only if prefer_sql=True)
+    # Only execute if sql_query is a valid SQL string (not NO_SQL, not "", not None)
+    # AND user requested SQL (prefer_sql=True)
+    if request.prefer_sql and sql_query and sql_query != NO_SQL and sql_query != "":
             try:
                 # Parse source schema from SQL
                 source_schema = _parse_schema_from_sql(sql_query)
                 
                 rows, exec_time = run_sql(sql_query, check_empty=False)
-                total_execution_time += exec_time
+                # Note: total_execution_time will be calculated at the end based on start_time
                 
                 # Auto-enrich with product info if product_id present
                 rows = enrich_with_product_info(rows)
                 
                 rows_preview = rows[:50]  # Preview first 50 rows
                 
-                # Check for empty result and raise GuardError
-                if len(rows) == 0:
-                    raise GuardError(GuardCode.NO_DATA, "Query returned 0 rows")
+                # ✅ FIX: Xử lý 0 rows như output hợp lệ, không phải lỗi
+                has_no_data = len(rows) == 0
                 
-                # Log SQL execution
-                log_sql_execution(session_id, sql_query, len(rows), exec_time)
+                # Log SQL execution (with trace ID)
+                log_sql_execution(session_id, sql_query, len(rows), exec_time, error=None, trace_id=trace_id)
+                
+                # Set no_data flag và message mềm (không raise error, vẫn trả về SQL và rows)
+                if has_no_data:
+                    # Tạo thông báo mềm cho 0 rows, không phải lỗi
+                    no_data_msg, no_data_suggestions = message_and_suggestions(GuardCode.NO_DATA, skill_metadata, question)
+                    # Lưu vào suggestions để hiển thị, nhưng KHÔNG set error_msg (vì không phải lỗi)
+                    if suggestions is None:
+                        suggestions = no_data_suggestions
+                    # Note: answer sẽ được format với rows_preview = [] để hiển thị "Không có dữ liệu"
                 
                 # Update session context (Việc C - Context memory)
                 # Extract time window, dimensions, measures, grain from SQL/metadata
@@ -1045,24 +1592,24 @@ def ask(request: AskRequest):
                 # Store suggestions for later use
                 suggestions = error_suggestions
                 
-                # Log the error
-                log_sql_execution(session_id, sql_query, 0, 0, str(e.detail))
+                # Log the error (with trace ID)
+                log_sql_execution(session_id, sql_query, 0, 0, str(e.detail), trace_id=trace_id)
                 
             except HTTPException as e:
                 # Fallback for HTTPException (should not happen with new code)
                 error_msg = f"Lỗi SQL: {e.detail}"
                 guard_code = GuardCode.AMBIGUOUS_INTENT
                 suggestions = ["Doanh thu 3 tháng gần đây", "Top 10 sản phẩm bán chạy", "Phương thức thanh toán phổ biến"]
-                log_sql_execution(session_id, sql_query, 0, 0, str(e.detail))
+                log_sql_execution(session_id, sql_query, 0, 0, str(e.detail), trace_id=trace_id)
             except Exception as e:
                 # Fallback for other exceptions
                 error_msg = f"Lỗi không xác định: {str(e)}"
                 guard_code = GuardCode.AMBIGUOUS_INTENT
                 suggestions = ["Doanh thu 3 tháng gần đây", "Top 10 sản phẩm bán chạy", "Phương thức thanh toán phổ biến"]
-                log_sql_execution(session_id, sql_query, 0, 0, str(e))
-        
-        # 1d. No SQL generated - suggest examples
-        elif not sql_query or sql_query is None:
+                log_sql_execution(session_id, sql_query, 0, 0, str(e), trace_id=trace_id)
+    
+    # 1d. No SQL generated - suggest examples (only if prefer_sql=True)
+    elif request.prefer_sql and (not sql_query or sql_query is None):
             # Check if this is an ambiguous intent (user wants SQL but we couldn't generate)
             # This could be due to unclear question
             guard_code = GuardCode.AMBIGUOUS_INTENT
@@ -1087,7 +1634,27 @@ def ask(request: AskRequest):
             # Default suggestions
             suggestions = ["Doanh thu 3 tháng gần đây", "Top 10 sản phẩm bán chạy", "Phương thức thanh toán phổ biến"]
     
-    # 4. Format answer with header, summary, and suggestions
+    # Calculate total execution time
+    total_execution_time = int((time.time() - start_time) * 1000)
+    
+    # 4. Generate explanation if requested and enabled
+    explanation = None
+    if ENABLE_EXPLANATION and request.explain and sql_query and sql_query != NO_SQL and sql_query != "":
+        try:
+            explanation = _explain_sql_and_lineage(sql_query, source_schema, rows_preview)
+        except Exception as e:
+            print(f"⚠️  Explanation error: {e}")
+    
+    # 5. Generate quick actions if guard_code exists and enabled
+    suggested_actions = None
+    if ENABLE_SUGGESTED_ACTIONS and guard_code and sql_query and sql_query != NO_SQL and sql_query != "":
+        try:
+            issues = [guard_code] if guard_code else []
+            suggested_actions = suggest_actions(sql_query, issues)
+        except Exception as e:
+            print(f"⚠️  Quick actions error: {e}")
+    
+    # 6. Format answer with header, summary, and suggestions
     # Note: We already returned early for NO_SQL and HELP modes above
     answer = format_answer(
         question=question,
@@ -1103,6 +1670,27 @@ def ask(request: AskRequest):
     # Log assistant response
     log_conversation(session_id, "assistant", answer)
     
+    # Log to chat_logs table for analysis and improvement
+    skill_name = skill_metadata.get('skill_name') if skill_metadata else None
+    confidence = skill_metadata.get('confidence') if skill_metadata else None
+    error_code_str = guard_code.value if guard_code else (error_msg[:50] if error_msg else None)
+    
+    log_chat(
+        question=question,
+        generated_sql=sql_query if sql_query and sql_query != NO_SQL and sql_query != "" else None,
+        error_code=error_code_str,
+        execution_time_ms=total_execution_time,
+        row_count=len(rows_preview) if rows_preview else 0,
+        session_id=session_id,
+        skill_name=skill_name,
+        confidence=confidence,
+        source_schema=source_schema
+    )
+    
+    # Record metrics
+    status_code = 200 if not error_msg else 500
+    record_request("/ask", status_code, total_execution_time, len(rows_preview) if rows_preview else 0, error=bool(error_msg))
+    
     return AskResponse(
         session_id=session_id,
         answer=answer,
@@ -1110,7 +1698,9 @@ def ask(request: AskRequest):
         rows_preview=rows_preview,
         citations=citations,
         execution_time_ms=total_execution_time,
-        suggestions=suggestions
+        suggestions=suggestions,
+        explanation=explanation,
+        suggested_actions=suggested_actions
     )
 
 

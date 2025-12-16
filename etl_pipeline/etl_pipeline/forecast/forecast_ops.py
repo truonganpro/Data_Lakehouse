@@ -23,36 +23,38 @@ def op_build_features():
 
 @op(ins={"features_table": In(str)}, out=Out(str))
 def op_train_model(features_table: str) -> str:
-    """Train LightGBM model"""
+    """Train LightGBM model for revenue (default)"""
     logger = get_dagster_logger()
-    logger.info("🤖 Training forecasting model...")
+    logger.info("🤖 Training forecasting model (revenue)...")
     
-    from etl_pipeline.ml.train_models import train_lightgbm
+    from etl_pipeline.ml.train_models import train_lightgbm, TargetType
     
     run_id = train_lightgbm(
         features_table=features_table,
         mlflow_experiment="demand_forecast",
         n_splits=5,
+        target_type=TargetType.REVENUE,  # Train revenue model
         target_transform="log1p",
     )
     
-    logger.info(f"✅ Model trained: run_id={run_id}")
+    logger.info(f"✅ Model trained (revenue): run_id={run_id}")
     return run_id
 
 
 @op(ins={"run_id": In(str), "features_table": In(str)}, out=Out(str))
 def op_batch_predict(run_id: str, features_table: str) -> str:
-    """Generate batch predictions"""
+    """Generate batch predictions for revenue (default)"""
     logger = get_dagster_logger()
     logger.info(f"🔮 Generating forecasts with model: {run_id}")
     
-    from etl_pipeline.ml.batch_predict import batch_predict
+    from etl_pipeline.ml.batch_predict import batch_predict, TargetType
     
     output_table = batch_predict(
         run_id=run_id,
         features_table=features_table,
-        output_table="platinum.demand_forecast",
+        output_table=None,  # Will be set to demand_forecast_revenue by default
         horizon_days=28,
+        target_type=TargetType.REVENUE,  # Predict revenue
         target_transform="log1p",
     )
     

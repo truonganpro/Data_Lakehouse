@@ -83,34 +83,44 @@ fi
 # ============================================================================
 # MODE: REBUILD
 # ============================================================================
+# Detect docker compose command
+if docker compose version &> /dev/null; then
+    COMPOSE_CMD="docker compose"
+elif docker-compose version &> /dev/null; then
+    COMPOSE_CMD="docker-compose"
+else
+    echo -e "${RED}✗ Docker Compose not found!${NC}"
+    exit 1
+fi
+
 if [ "$MODE" = "rebuild" ]; then
     echo -e "${YELLOW}[1/5] Stopping services...${NC}"
-    docker-compose down
+    $COMPOSE_CMD down
     echo -e "${GREEN}✓ Services stopped${NC}"
     echo ""
 
     echo -e "${YELLOW}[2/5] Rebuilding images (no cache)...${NC}"
-    docker-compose build --no-cache dagster etl_pipeline streamlit
+    $COMPOSE_CMD build --no-cache dagster etl_pipeline streamlit
     echo -e "${GREEN}✓ Images rebuilt${NC}"
     echo ""
 
     echo -e "${YELLOW}[3/5] Starting services in order...${NC}"
-    docker-compose up -d de_mysql
+    $COMPOSE_CMD up -d de_mysql
     sleep 20
-    docker-compose up -d minio mc hive-metastore
+    $COMPOSE_CMD up -d minio mc hive-metastore
     sleep 15
-    docker-compose up -d spark-master spark-worker-1
+    $COMPOSE_CMD up -d spark-master spark-worker-1
     sleep 10
-    docker-compose up -d etl_pipeline
+    $COMPOSE_CMD up -d etl_pipeline
     sleep 10
-    docker-compose up -d de_dagster de_dagster_dagit de_dagster_daemon
+    $COMPOSE_CMD up -d de_dagster de_dagster_dagit de_dagster_daemon
     sleep 10
-    docker-compose up -d trino metabase streamlit
+    $COMPOSE_CMD up -d trino metabase streamlit
     echo -e "${GREEN}✓ All services started${NC}"
     echo ""
 
     echo -e "${YELLOW}[4/5] Checking status...${NC}"
-    docker-compose ps
+    $COMPOSE_CMD ps
     echo ""
 
     echo -e "${YELLOW}[5/5] Verifying services...${NC}"
@@ -140,7 +150,7 @@ fi
 # ============================================================================
 if [ "$QUICK_MODE" = false ]; then
     echo -e "${YELLOW}[1/9] Cleaning environment...${NC}"
-    docker-compose down -v 2>/dev/null || true
+    $COMPOSE_CMD down -v 2>/dev/null || true
     echo -e "${GREEN}✓ Environment cleaned${NC}"
     echo ""
 
@@ -154,12 +164,12 @@ if [ "$QUICK_MODE" = false ]; then
     echo ""
 
     echo -e "${YELLOW}[3/9] Building Docker images (5-10 minutes)...${NC}"
-    docker-compose build
+    $COMPOSE_CMD build
     echo -e "${GREEN}✓ Images built successfully${NC}"
     echo ""
 
     echo -e "${YELLOW}[4/9] Starting services...${NC}"
-    docker-compose up -d
+    $COMPOSE_CMD up -d
     echo -e "${GREEN}✓ Services started${NC}"
     echo ""
 
@@ -263,7 +273,7 @@ if [ "$QUICK_MODE" = false ]; then
     echo "  • Run ETL again:       ${GREEN}./full_setup.sh --etl${NC}"
     echo "  • Rebuild after fix:   ${GREEN}./full_setup.sh --rebuild${NC}"
     echo "  • Fresh install:       ${GREEN}./full_setup.sh --fresh${NC}"
-    echo "  • Check services:      ${GREEN}docker-compose ps${NC}"
+    echo "  • Check services:      ${GREEN}$COMPOSE_CMD ps${NC}"
     echo ""
     echo -e "${GREEN}Happy Data Engineering! 🚀${NC}"
 fi

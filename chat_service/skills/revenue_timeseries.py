@@ -17,10 +17,54 @@ class RevenueTimeseriesSkill(BaseSkill):
         # Must have "doanh thu" or "revenue" or "gmv"
         has_revenue = any(kw in q for kw in ['doanh thu', 'revenue', 'gmv', 'bán được'])
         
-        # And time dimension
-        has_time = any(kw in q for kw in ['theo', 'theo thời gian', 'per', 'by', 'tháng', 'tuần', 'ngày', 'month', 'week', 'day'])
+        # Check for time granularity keywords (more specific than generic "theo/by/per")
+        # Explicit time grain keywords to avoid conflicts with "theo bang", "by region", etc.
+        has_time_grain = any(
+            kw in q
+            for kw in [
+                'theo tháng',
+                'theo tuần',
+                'theo ngày',
+                'tháng',
+                'tuần',
+                'ngày',
+                'month',
+                'week',
+                'day',
+                'quý',
+                'q',
+                'quarter',
+                'year',
+                'năm',
+                'theo thời gian',
+            ]
+        )
         
-        if has_revenue and has_time:
+        # Check if question is about region/distribution (should NOT match)
+        has_region_keywords = any(
+            kw in q
+            for kw in [
+                'theo bang',
+                'theo vùng',
+                'theo miền',
+                'by region',
+                'by state',
+                'phân bố',
+                'distribution',
+                'bang',
+                'vùng',
+                'region',
+                'state',
+                'geolocation_state',
+            ]
+        )
+        
+        # If question mentions region/distribution, don't match this skill
+        if has_region_keywords:
+            return 0.0
+        
+        # Match if has revenue and explicit time grain
+        if has_revenue and has_time_grain:
             return 0.95
         elif has_revenue:
             return 0.7

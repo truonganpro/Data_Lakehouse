@@ -1,3 +1,12 @@
+"""
+Streamlit Dashboard - Data Lakehouse
+Main dashboard application for the Data Lakehouse project
+
+Author: Truong An
+Project: Data Lakehouse - Modern Data Stack
+License: MIT
+"""
+
 import streamlit as st
 import requests
 import time

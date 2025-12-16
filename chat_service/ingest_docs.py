@@ -31,7 +31,10 @@ def ensure_collection(client: QdrantClient, dim: int):
 
 def chunk_text(text: str, chunk_size: int = 1000, overlap: int = 200) -> List[str]:
     """
-    Split text into overlapping chunks
+    Split text into chunks, prioritizing markdown headings.
+    
+    Chunk thông minh hơn: ưu tiên cắt theo heading (##, ###), 
+    sau đó mới fallback cắt theo length.
     
     Args:
         text: Input text
@@ -41,17 +44,51 @@ def chunk_text(text: str, chunk_size: int = 1000, overlap: int = 200) -> List[st
     Returns:
         List of text chunks
     """
-    chunks = []
-    start = 0
+    lines = text.splitlines()
+    sections = []
+    current_section = []
     
-    while start < len(text):
-        end = start + chunk_size
-        chunk = text[start:end]
+    # Split into sections by heading (##, ###)
+    for line in lines:
+        # Check if line is a heading (starts with #)
+        if line.strip().startswith('#'):
+            # Save current section if not empty
+            if current_section:
+                section_text = '\n'.join(current_section).strip()
+                if section_text:
+                    sections.append(section_text)
+                current_section = []
         
-        if chunk.strip():
-            chunks.append(chunk)
-        
-        start += (chunk_size - overlap)
+        # Add line to current section
+        current_section.append(line)
+    
+    # Don't forget the last section
+    if current_section:
+        section_text = '\n'.join(current_section).strip()
+        if section_text:
+            sections.append(section_text)
+    
+    # If no headings found, treat entire text as one section
+    if len(sections) == 0:
+        sections = [text.strip()] if text.strip() else []
+    
+    # Now chunk each section (if section is too long, split by length)
+    chunks = []
+    for section in sections:
+        if len(section) <= chunk_size:
+            # Section fits in one chunk
+            chunks.append(section)
+        else:
+            # Section is too long, split by length with overlap
+            start = 0
+            while start < len(section):
+                end = start + chunk_size
+                chunk = section[start:end]
+                
+                if chunk.strip():
+                    chunks.append(chunk)
+                
+                start += (chunk_size - overlap)
     
     return chunks
 

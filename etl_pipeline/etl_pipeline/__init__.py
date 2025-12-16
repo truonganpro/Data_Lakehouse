@@ -9,8 +9,11 @@ except ImportError:
     NOTEBOOK_IO_MANAGER_AVAILABLE = False
 
 from .assets import bronze, silver, gold, platinum
+from .assets import maintenance
 from .job import reload_data, full_pipeline_job
-from .schedule import  reload_data_schedule
+from .job import maintenance_job
+from .schedule import reload_data_schedule
+from .schedule import maintenance_schedule
 from .resources.minio_io_manager import MinioIOManager
 from .resources.mysql_io_manager import MysqlIOManager
 from .resources.spark_io_manager import SparkIOManager
@@ -62,10 +65,62 @@ bronze_layer_assets = load_assets_from_modules([bronze])
 silver_layer_assets = load_assets_from_modules([silver])
 gold_layer_assets = load_assets_from_modules([gold])
 platinum_layer_assets = load_assets_from_modules([platinum])
+maintenance_assets = load_assets_from_modules([maintenance])
 
 # Collect jobs and schedules
 all_jobs = [reload_data, full_pipeline_job]
+
+# Add maintenance jobs
+try:
+    from .job.maintenance_job import (
+        compact_recent_partitions_job,
+        compact_platinum_job,
+        vacuum_job,
+        monitor_job,
+        all_maintenance_job
+    )
+    all_jobs.extend([
+        compact_recent_partitions_job,
+        compact_platinum_job,
+        vacuum_job,
+        monitor_job,
+        all_maintenance_job
+    ])
+except ImportError:
+    pass
+
+# Add optimize job
+try:
+    from .job.optimize_job import optimize_lakehouse_job
+    all_jobs.append(optimize_lakehouse_job)
+except ImportError:
+    pass
+
 all_schedules = [reload_data_schedule]
+
+# Add maintenance schedules
+try:
+    from .schedule.maintenance_schedule import (
+        daily_compaction_gold_schedule,
+        daily_compaction_platinum_schedule,
+        weekly_vacuum_schedule,
+        daily_small_files_monitor_schedule
+    )
+    all_schedules.extend([
+        daily_compaction_gold_schedule,
+        daily_compaction_platinum_schedule,
+        weekly_vacuum_schedule,
+        daily_small_files_monitor_schedule
+    ])
+except ImportError:
+    pass
+
+# Add optimize schedule
+try:
+    from .schedule.optimize_schedule import daily_optimize_lakehouse_schedule
+    all_schedules.append(daily_optimize_lakehouse_schedule)
+except ImportError:
+    pass
 
 # Add forecast job if available
 if FORECAST_AVAILABLE:
@@ -76,7 +131,8 @@ defs = Definitions(
     assets=bronze_layer_assets
     + silver_layer_assets
     + gold_layer_assets
-    + platinum_layer_assets,
+    + platinum_layer_assets
+    + maintenance_assets,
     jobs=all_jobs,
     schedules=all_schedules,
     resources=resources,

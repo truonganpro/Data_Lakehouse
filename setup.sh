@@ -1,6 +1,6 @@
 #!/bin/bash
 # ===================================================================
-# 🚀 DATA LAKEHOUSE FRESH - QUICK SETUP SCRIPT
+# 🚀 DATA LAKEHOUSE - QUICK SETUP SCRIPT
 # ===================================================================
 # Quick setup script for new users with interactive prompts
 # For full automated setup, use: ./full_setup.sh

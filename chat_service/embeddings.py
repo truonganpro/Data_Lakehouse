@@ -42,19 +42,35 @@ def _embed_gemini(texts: List[str]) -> Tuple[List[List[float]], int]:
     print(f"📦 Embedding with Gemini: {len(texts)} texts")
     
     # Gemini supports batch embedding
-    result = genai.embed_content(
-        model=model,
-        content=texts,
-        task_type="retrieval_document"  # for RAG use case
-    )
-    
-    # Extract embeddings from result
-    if "embedding" in result:
-        # Single text input
+    # For batch, we need to embed one by one or use batch API correctly
+    if len(texts) == 1:
+        result = genai.embed_content(
+            model=model,
+            content=texts[0],
+            task_type="retrieval_document"
+        )
         embeddings = [result["embedding"]]
     else:
-        # Multiple texts
-        embeddings = [emb for emb in result["embeddings"]]
+        # For multiple texts, embed them one by one or use proper batch
+        embeddings = []
+        for text in texts:
+            result = genai.embed_content(
+                model=model,
+                content=text,
+                task_type="retrieval_document"
+            )
+            if "embedding" in result:
+                embeddings.append(result["embedding"])
+            else:
+                # Fallback: try to get from embeddings list
+                emb_list = result.get("embeddings", [])
+                if emb_list:
+                    embeddings.append(emb_list[0])
+                else:
+                    raise ValueError(f"Could not extract embedding from result: {result.keys()}")
+    
+    # Ensure all embeddings are lists of floats
+    embeddings = [[float(x) for x in emb] if isinstance(emb, list) else emb for emb in embeddings]
     
     return embeddings, 768
 

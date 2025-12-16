@@ -245,6 +245,113 @@ def get_about_dataset_card() -> str:
     return "\n".join(parts)
 
 
+def top_tables_by_rows(n: int = 5) -> List[Dict]:
+    """
+    Get top N tables by row count from metadata catalog
+    
+    Args:
+        n: Number of tables to return (default 5)
+        
+    Returns:
+        List of dicts with schema, table, row_count, bytes, num_files
+    """
+    try:
+        conn = get_trino_connection()
+        cur = conn.cursor()
+        
+        # Try to read from platinum_sys.data_catalog if exists
+        try:
+            sql = f"""
+                SELECT 
+                    schema, 
+                    table_name as table, 
+                    row_count, 
+                    bytes, 
+                    num_files
+                FROM lakehouse.platinum_sys.data_catalog
+                ORDER BY row_count DESC
+                LIMIT {int(n)}
+            """
+            cur.execute(sql)
+            columns = [desc[0] for desc in cur.description]
+            rows = cur.fetchall()
+            cur.close()
+            conn.close()
+            
+            # Convert to list of dicts
+            result = [dict(zip(columns, row)) for row in rows]
+            return result
+        except Exception as e:
+            # Fallback: query information_schema and estimate row counts
+            print(f"⚠️  platinum_sys.data_catalog not available, using fallback: {e}")
+            cur.close()
+            conn.close()
+            
+            # Fallback: query tables from gold and platinum schemas
+            return _fallback_top_tables_by_rows(n)
+            
+    except Exception as e:
+        print(f"⚠️  Error getting top tables by rows: {e}")
+        return []
+
+
+def _fallback_top_tables_by_rows(n: int = 5) -> List[Dict]:
+    """
+    Fallback: Get top tables by querying information_schema and estimating row counts
+    This is slower but works when platinum_sys.data_catalog doesn't exist
+    """
+    try:
+        conn = get_trino_connection()
+        cur = conn.cursor()
+        
+        # Get all tables from gold and platinum
+        tables = []
+        
+        for schema in ["gold", "platinum"]:
+            try:
+                cur.execute(f"SHOW TABLES FROM lakehouse.{schema}")
+                schema_tables = [row[0] for row in cur.fetchall()]
+                
+                for table in schema_tables:
+                    try:
+                        # Get approximate row count (LIMIT 1 to avoid full scan)
+                        # Note: This is an estimate, not exact
+                        cur.execute(f"""
+                            SELECT COUNT(*) as cnt 
+                            FROM lakehouse.{schema}.{table} 
+                            LIMIT 1
+                        """)
+                        row = cur.fetchone()
+                        row_count = row[0] if row else 0
+                        
+                        if row_count > 0:
+                            tables.append({
+                                "schema": schema,
+                                "table": table,
+                                "row_count": row_count,
+                                "bytes": None,  # Not available without catalog
+                                "num_files": None  # Not available without catalog
+                            })
+                    except Exception as e:
+                        # Skip tables that can't be queried
+                        print(f"⚠️  Skipping {schema}.{table}: {e}")
+                        continue
+            except Exception as e:
+                print(f"⚠️  Error listing tables from {schema}: {e}")
+                continue
+        
+        cur.close()
+        conn.close()
+        
+        # Sort by row_count and return top N
+        tables.sort(key=lambda x: x.get("row_count", 0), reverse=True)
+        return tables[:n]
+        
+    except Exception as e:
+        print(f"⚠️  Error in fallback top tables: {e}")
+        return []
+
+
 if __name__ == "__main__":
     # Test
     print("="*60)
@@ -252,4 +359,11 @@ if __name__ == "__main__":
     print("="*60)
     card = get_about_dataset_card()
     print(card)
+    
+    print("\n" + "="*60)
+    print("Testing Top Tables by Rows")
+    print("="*60)
+    top_tables = top_tables_by_rows(5)
+    for table in top_tables:
+        print(f"{table.get('schema', 'N/A')}.{table.get('table', 'N/A')}: {table.get('row_count', 0):,} rows")
 

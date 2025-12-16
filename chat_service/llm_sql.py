@@ -65,6 +65,44 @@ SCHEMA (Rút gọn):
 - unique_customers (BIGINT): Số khách hàng unique
 - payment_total (DECIMAL): Tổng thanh toán
 
+**platinum.demand_forecast_revenue** (Dự báo nhu cầu doanh thu theo ngày & horizon)
+- forecast_date (TIMESTAMP): Ngày dự báo (ngày mà yhat áp dụng)
+- product_id (STRING): ID sản phẩm
+- region_id (STRING): Mã vùng/bang (SP, RJ, MG, ...)
+- horizon (BIGINT): Số ngày từ ngày chạy model (1 = ngày mai, 7 = 7 ngày nữa)
+- yhat (DOUBLE): Giá trị dự báo trung bình (doanh thu)
+- yhat_lo (DOUBLE): Biên dưới khoảng tin cậy (thận trọng)
+- yhat_hi (DOUBLE): Biên trên khoảng tin cậy (lạc quan)
+- target_type (STRING): "revenue" hoặc "quantity"
+- model_name (STRING): Tên model (vd: "lightgbm_revenue_global")
+- model_version (STRING): Phiên bản model
+- run_id (STRING): MLflow run ID
+- generated_at (TIMESTAMP): Thời điểm tạo dự báo
+
+**platinum.demand_forecast_quantity** (Dự báo nhu cầu số lượng theo ngày & horizon)
+- Các cột tương tự như demand_forecast_revenue nhưng target_type = "quantity"
+- yhat, yhat_lo, yhat_hi là số lượng đơn vị (không phải doanh thu)
+
+**platinum.forecast_monitoring** (Monitoring độ chính xác forecast - nếu có)
+- date (DATE): Ngày thực tế
+- product_id (STRING), region_id (STRING), horizon (INT)
+- y_actual (DOUBLE): Giá trị thực tế
+- yhat, yhat_lo, yhat_hi (DOUBLE): Giá trị dự báo tương ứng
+- abs_error (DOUBLE): |y_actual - yhat|
+- pct_error (DOUBLE): % sai số tuyệt đối
+- smape (DOUBLE): sMAPE (thước đo chuẩn cho forecast)
+- model_name (STRING), run_id (STRING)
+
+**platinum.forecast_backtest_detail** (Chi tiết backtest - nếu có)
+- cutoff_date (DATE): Ngày cutoff cho backtest
+- product_id (STRING), region_id (STRING)
+- date (DATE): Ngày thực tế
+- horizon (INT): Horizon
+- y (DOUBLE): Giá trị thực tế
+- yhat (DOUBLE): Giá trị dự báo
+- yhat_naive (DOUBLE): Baseline naive (last value)
+- run_id (STRING), model_name (STRING), target_type (STRING)
+
 VÍ DỤ:
 
 Câu hỏi: "Doanh thu theo tháng 3 tháng gần đây?"
@@ -114,6 +152,56 @@ ORDER BY 5 DESC
 LIMIT 10
 ```
 
+Câu hỏi: "Tổng forecast doanh thu 7 ngày tới cho từng bang?"
+SQL:
+```sql
+SELECT
+    region_id,
+    SUM(yhat) AS total_forecast_revenue
+FROM lakehouse.platinum.demand_forecast_revenue
+WHERE forecast_date >= CURRENT_DATE
+  AND forecast_date < date_add('day', 7, CURRENT_DATE)
+  AND horizon BETWEEN 1 AND 7
+GROUP BY region_id
+ORDER BY total_forecast_revenue DESC
+LIMIT 200
+```
+
+Câu hỏi: "Dự báo nhu cầu 7 ngày tới cho category watches_gifts ở bang SP?"
+SQL:
+```sql
+SELECT
+    CAST(f.forecast_date AS DATE) AS forecast_date,
+    f.horizon,
+    f.yhat,
+    f.yhat_lo,
+    f.yhat_hi
+FROM lakehouse.platinum.demand_forecast_revenue f
+LEFT JOIN lakehouse.gold.dim_product dp ON f.product_id = dp.product_id
+LEFT JOIN lakehouse.gold.dim_product_category dpc ON dp.product_category_name = dpc.product_category_name
+WHERE dpc.product_category_name_english = 'watches_gifts'
+  AND f.region_id = 'SP'
+  AND CAST(f.forecast_date AS DATE) >= CURRENT_DATE
+  AND CAST(f.forecast_date AS DATE) < date_add('day', 7, CURRENT_DATE)
+  AND f.horizon BETWEEN 1 AND 7
+ORDER BY f.forecast_date, f.horizon
+LIMIT 200
+```
+
+Câu hỏi: "sMAPE trung bình tháng vừa rồi của model forecast?"
+SQL:
+```sql
+SELECT
+    date_trunc('month', date) AS month,
+    AVG(smape) AS avg_smape,
+    COUNT(*) AS n_samples
+FROM lakehouse.platinum.forecast_monitoring
+WHERE date >= date_add('month', -1, CURRENT_DATE)
+GROUP BY 1
+ORDER BY month DESC
+LIMIT 200
+```
+
 ===
 
 CÂU HỎI: ```{question}```
@@ -140,8 +228,8 @@ def gen_sql_with_gemini(question: str) -> str | None:
     try:
         genai.configure(api_key=api_key)
         
-        # Use gemini-1.5-flash for fast, cost-effective SQL generation
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        # Use gemini-2.0-flash for fast, cost-effective SQL generation
+        model = genai.GenerativeModel("gemini-2.0-flash")
         
         prompt = PROMPT_SQL.format(question=question)
         

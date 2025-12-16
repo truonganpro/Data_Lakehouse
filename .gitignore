@@ -96,3 +96,13 @@ brazilian-ecommerce/*.csv
 tmp/
 temp/
 test_*.py.bak
+
+# Generated summary files (backup/consolidation files)
+*_ALL_FILES.txt
+*_ALL_CONFIG*.txt
+*_COMPLETE.txt
+PROJECT_DESCRIPTION.txt
+CHAT_SERVICE_*.txt
+DASHBOARD_*.txt
+FORECAST_*.txt
+QUERY_WINDOW_*.txt

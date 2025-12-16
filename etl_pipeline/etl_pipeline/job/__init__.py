@@ -24,3 +24,15 @@ full_pipeline_job = define_asset_job(
     selection=AssetSelection.all(),  # Run all layers
 )
 
+# Export maintenance jobs
+try:
+    from .maintenance_job import (
+        compact_recent_partitions_job,
+        compact_platinum_job,
+        vacuum_job,
+        monitor_job,
+        all_maintenance_job
+    )
+except ImportError:
+    pass
+

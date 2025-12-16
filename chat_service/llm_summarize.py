@@ -6,9 +6,10 @@ import os
 import re
 from typing import List, Dict, Optional
 import google.generativeai as genai
+from llm.registry import generate_with_fallback
 
 
-PROMPT_SUMMARY = """Bạn là nhà phân tích dữ liệu chuyên nghiệp. Tóm tắt kết quả truy vấn NGẮN GỌN (2-4 câu) bằng tiếng Việt, có nêu số liệu nổi bật.
+PROMPT_SUMMARY = """Bạn là nhà phân tích dữ liệu chuyên nghiệp. Tóm tắt kết quả truy vấn theo cấu trúc CHÍNH XÁC 3 câu bằng tiếng Việt.
 
 ĐẦU VÀO:
 - Câu hỏi: {question}
@@ -17,18 +18,55 @@ PROMPT_SUMMARY = """Bạn là nhà phân tích dữ liệu chuyên nghiệp. Tó
 
 {citations_section}
 
-YÊU CẦU:
-1. **Phạm vi**: Nêu 1 câu về phạm vi dữ liệu (tháng/quý, top-N nếu có).
-2. **Xu hướng**: 1-2 câu về xu hướng ↑↓ (tăng/giảm, cao nhất/thấp nhất).
-3. **Điểm đáng chú ý**: 1 câu nêu điều đáng chú ý (outlier, tăng/giảm mạnh, top/bottom).
-4. **Không bịa số**: Chỉ dùng số liệu có trong bảng.
-5. **Ngắn gọn**: Tối đa 4 câu, không liệt kê quá dài.
+YÊU CẦU (CHÍNH XÁC 3 CÂU):
+
+**Câu 1**: Giải thích ngắn dataset + source (schema.table) + khoảng thời gian nếu có.
+- Nêu nguồn dữ liệu (ví dụ: "Dữ liệu từ `lakehouse.platinum.dm_sales_monthly_category`")
+- Nêu phạm vi thời gian nếu có (ví dụ: "từ tháng 06-08/2018" hoặc "top 10 sản phẩm")
+- Ngắn gọn, chỉ 1 câu
+
+**Câu 2**: Nêu insight chính: xu hướng tăng/giảm, nhóm top/bottom, so sánh quan trọng.
+- Xu hướng: tăng/giảm, cao nhất/thấp nhất, biến động
+- So sánh: giữa các nhóm, thời kỳ, categories
+- Số liệu cụ thể (ví dụ: "từ 1.23M → 987K", "cao nhất 1.12M")
+- Ngắn gọn, chỉ 1 câu
+
+**Câu 3**: Đưa ra 1 gợi ý hành động (actionable) cho business.
+- Gợi ý cụ thể dựa trên insight (ví dụ: "Nên tập trung marketing vào tháng cao điểm")
+- Actionable: có thể thực hiện được, không chung chung
+- Liên quan đến kết quả phân tích
+- Ngắn gọn, chỉ 1 câu
+
+LƯU Ý:
+- KHÔNG bịa số: Chỉ dùng số liệu có trong bảng
+- CHÍNH XÁC 3 câu, không nhiều hơn, không ít hơn
+- Mỗi câu ngắn gọn, dễ hiểu
+- Dùng tiếng Việt tự nhiên
 
 Ví dụ:
-- "Doanh thu theo tháng từ 06-08/2018, giảm dần từ 1.23M → 987K. Tháng cao nhất là 07/2018 với 1.12M. Xu hướng giảm nhẹ nhưng ổn định."
-- "Top 10 sản phẩm bán chạy, GMV từ 50K → 200K. Sản phẩm số 1 có GMV 200K, chiếm 15% tổng. Phân bố đều, không có outlier."
+"Dữ liệu từ `lakehouse.platinum.dm_sales_monthly_category` từ tháng 06-08/2018 cho thấy doanh thu giảm dần từ 1.23M → 987K, với tháng cao nhất là 07/2018 (1.12M). Xu hướng giảm nhẹ nhưng ổn định, không có biến động đột ngột. Nên tập trung phân tích nguyên nhân giảm và tăng cường marketing vào tháng cao điểm (07/2018) để duy trì hiệu quả."
 
-Trả lời NGẮN GỌN, CHÍNH XÁC, DỄ HIỂU.
+Trả lời CHÍNH XÁC 3 CÂU, NGẮN GỌN, CHÍNH XÁC, DỄ HIỂU, ACTIONABLE.
+"""
+
+
+PROMPT_DOCS_QA = """Bạn là trợ lý chuyên giải thích các khái niệm và metrics trong hệ thống dự báo nhu cầu.
+
+Dựa trên các đoạn tài liệu được cung cấp, hãy trả lời câu hỏi của người dùng một cách ngắn gọn, chính xác và dễ hiểu.
+
+ĐẦU VÀO:
+- Câu hỏi: {question}
+- Tài liệu liên quan:
+{citations_text}
+
+YÊU CẦU:
+- Trả lời bằng tiếng Việt, tự nhiên và dễ hiểu
+- Chỉ dùng thông tin từ tài liệu được cung cấp, không bịa thêm
+- Nếu tài liệu có số liệu cụ thể (ví dụ: "sMAPE < 20% là rất tốt"), hãy nêu rõ
+- Nếu câu hỏi về định nghĩa, giải thích ngắn gọn công thức/khái niệm
+- Nếu câu hỏi về ngưỡng tốt/xấu, nêu rõ các mức độ
+
+Trả lời:
 """
 
 
@@ -59,8 +97,8 @@ def summarize_with_gemini(
     try:
         genai.configure(api_key=api_key)
         
-        # Use gemini-1.5-flash for fast, cost-effective summarization
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        # Use gemini-2.0-flash for fast, cost-effective summarization
+        model = genai.GenerativeModel("gemini-2.0-flash")
         
         # Format table preview
         if table_preview:
@@ -161,7 +199,12 @@ def _explain_sql_and_lineage(sql: str, source_schema: str, rows_preview: Optiona
             group_cols = group_by_match.group(1).strip()
             # Extract column names (simple heuristic)
             for col in group_cols.split(','):
-                col = col.strip().split()[-1]  # Get last word (column name)
+                # ✅ FIX: Safe split - handle empty strings
+                col_parts = col.strip().split()
+                if col_parts:
+                    col = col_parts[-1]  # Get last word (column name)
+                else:
+                    continue  # Skip empty columns
                 if col and col not in ['1', '2', '3', '4', '5']:  # Skip positional numbers
                     dimensions.append(col)
     
@@ -277,7 +320,10 @@ def format_answer(
         return "\n".join(answer_parts)
     
     # Success case: Add header with data provenance
-    if sql_query and rows_preview:
+    # ✅ FIX: Xử lý 0 rows như output hợp lệ
+    has_no_data = rows_preview is not None and len(rows_preview) == 0
+    
+    if sql_query:
         # Parse schema if not provided
         if not source_schema:
             source_schema = _parse_schema_from_sql(sql_query)
@@ -290,20 +336,41 @@ def format_answer(
         answer_parts.append(header)
         answer_parts.append("")  # Empty line
         
-        # Try to get Gemini summary
-        summary = summarize_with_gemini(question, rows_preview, citations)
-        
-        if summary:
-            answer_parts.append("📝 **Tóm tắt:**")
-            answer_parts.append(summary)
-            answer_parts.append("")  # Empty line
+        # ✅ FIX: Xử lý 0 rows với thông báo mềm
+        if has_no_data:
+            # Hiển thị thông báo "Không có dữ liệu" như một kết quả hợp lệ
+            answer_parts.append("📭 **Không có dữ liệu khớp điều kiện hiện tại.**")
+            answer_parts.append("")
+            answer_parts.append("💡 **Gợi ý:** Hãy thử:")
+            answer_parts.append("  • Mở rộng khoảng thời gian hoặc horizon")
+            answer_parts.append("  • Bỏ bớt bộ lọc (region, category)")
+            answer_parts.append("  • Kiểm tra lại điều kiện filter")
+            answer_parts.append("")
         else:
-            # Fallback: brief info about results
-            answer_parts.append(f"📊 **Kết quả:** {len(rows_preview)} dòng")
-            answer_parts.append("")  # Empty line
+            # Có dữ liệu - hiển thị summary bình thường
+            # Try to get Gemini summary
+            summary = summarize_with_gemini(question, rows_preview, citations)
+            
+            if summary:
+                answer_parts.append("📝 **Tóm tắt:**")
+                answer_parts.append(summary)
+                answer_parts.append("")  # Empty line
+            else:
+                # Fallback: brief info about results
+                answer_parts.append(f"📊 **Kết quả:** {len(rows_preview)} dòng")
+                answer_parts.append("")  # Empty line
         
         # Add SQL explanation and lineage (Việc D)
-        explain_text = _explain_sql_and_lineage(sql_query, source_schema, rows_preview)
+        # ✅ FIX: Chỉ explain khi có dữ liệu hoặc không phải no_data
+        if not has_no_data:
+            try:
+                explain_text = _explain_sql_and_lineage(sql_query, source_schema, rows_preview)
+            except Exception as e:
+                print(f"⚠️  Explanation error (non-critical): {e}")
+                explain_text = None
+        else:
+            explain_text = None
+            
         if explain_text:
             answer_parts.append("🧠 **Cách tính:**")
             answer_parts.append(explain_text)
@@ -364,4 +431,54 @@ if __name__ == "__main__":
     )
     
     print(f"\n{answer}")
+
+
+def summarize_docs_with_llm(question: str, citations: List[Dict]) -> Optional[str]:
+    """
+    Summarize documents from RAG search using LLM (for conceptual questions)
+    
+    Args:
+        question: User's question
+        citations: List of RAG citation dicts with 'text' and 'source'
+        
+    Returns:
+        Summary text or None if LLM not available
+    """
+    if not citations:
+        print("⚠️  No citations provided for summarize_docs_with_llm")
+        return None
+    
+    # Build citations text
+    citations_text = "\n\n".join([
+        f"[{i+1}] {cite.get('text', '')}\n(Nguồn: {cite.get('source', 'unknown')})"
+        for i, cite in enumerate(citations[:4])  # Use top 4 citations
+    ])
+    
+    print(f"📝 Citations text length: {len(citations_text)} chars")
+    
+    # Use LLM to generate answer from docs
+    try:
+        prompt = PROMPT_DOCS_QA.format(
+            question=question,
+            citations_text=citations_text
+        )
+        
+        print(f"🤖 Calling generate_with_fallback with kind='summary'")
+        answer = generate_with_fallback(
+            prompt=prompt,
+            kind="summary",  # Use summary kind for conceptual questions
+            system=None
+        )
+        
+        if answer:
+            print(f"✅ LLM generated answer: {len(answer)} chars")
+        else:
+            print(f"⚠️  LLM returned None or empty string")
+        
+        return answer
+    except Exception as e:
+        print(f"⚠️  Error summarizing docs with LLM: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
 
