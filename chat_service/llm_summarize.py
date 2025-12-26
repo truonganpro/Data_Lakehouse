@@ -50,6 +50,33 @@ Trả lời CHÍNH XÁC 3 CÂU, NGẮN GỌN, CHÍNH XÁC, DỄ HIỂU, ACTIONAB
 """
 
 
+def dedupe_citations(citations: List[dict], max_items: int = 3) -> List[dict]:
+    """
+    Deduplicate citations by source, keeping the first occurrence (highest score)
+    
+    Args:
+        citations: List of citation dicts with 'source' key
+        max_items: Maximum number of unique citations to return
+        
+    Returns:
+        List of deduplicated citations
+    """
+    if not citations:
+        return []
+    
+    seen = set()
+    out = []
+    for c in citations:
+        src = (c.get("source") or "unknown").strip()
+        if src in seen:
+            continue
+        seen.add(src)
+        out.append(c)
+        if len(out) >= max_items:
+            break
+    return out
+
+
 PROMPT_DOCS_QA = """Bạn là trợ lý chuyên giải thích các khái niệm và metrics trong hệ thống dự báo nhu cầu.
 
 Dựa trên các đoạn tài liệu được cung cấp, hãy trả lời câu hỏi của người dùng một cách ngắn gọn, chính xác và dễ hiểu.
@@ -125,11 +152,12 @@ def summarize_with_gemini(
         else:
             table_text = "(Không có dữ liệu)"
         
-        # Format citations
+        # Format citations (dedupe trước khi format)
         citations_section = ""
         if citations and len(citations) > 0:
+            citations_unique = dedupe_citations(citations, max_items=3)
             citations_section = "- Tài liệu tham khảo:\n"
-            for cite in citations[:3]:  # Show top 3 citations
+            for cite in citations_unique:
                 citations_section += f"  * {cite.get('source', 'unknown')} (độ liên quan: {cite.get('score', 0):.2f})\n"
         
         prompt = PROMPT_SUMMARY.format(
@@ -376,10 +404,11 @@ def format_answer(
             answer_parts.append(explain_text)
             answer_parts.append("")  # Empty line
     
-    # Add citations (if any)
+    # Add citations (if any) - dedupe trước khi format
     if citations and len(citations) > 0:
+        citations_unique = dedupe_citations(citations, max_items=3)
         answer_parts.append("📚 **Tài liệu tham khảo:**")
-        for cite in citations[:3]:  # Show top 3 citations
+        for cite in citations_unique:
             answer_parts.append(
                 f"  • {cite.get('source', 'unknown')} "
                 f"(độ liên quan: {cite.get('score', 0):.2f})"
@@ -448,10 +477,11 @@ def summarize_docs_with_llm(question: str, citations: List[Dict]) -> Optional[st
         print("⚠️  No citations provided for summarize_docs_with_llm")
         return None
     
-    # Build citations text
+    # Build citations text (dedupe trước khi format)
+    citations_unique = dedupe_citations(citations, max_items=4)
     citations_text = "\n\n".join([
         f"[{i+1}] {cite.get('text', '')}\n(Nguồn: {cite.get('source', 'unknown')})"
-        for i, cite in enumerate(citations[:4])  # Use top 4 citations
+        for i, cite in enumerate(citations_unique)
     ])
     
     print(f"📝 Citations text length: {len(citations_text)} chars")

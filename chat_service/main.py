@@ -25,7 +25,7 @@ from sqlalchemy import create_engine, text
 from sql_templates import intent_to_sql, get_safe_schemas, get_example_questions, NO_SQL
 from embeddings import embed_query
 from llm_sql import gen_sql_with_gemini
-from llm_summarize import format_answer, _parse_schema_from_sql, _explain_sql_and_lineage
+from llm_summarize import format_answer, _parse_schema_from_sql, _explain_sql_and_lineage, dedupe_citations
 from router import get_router
 from errors import GuardError, GuardCode
 from guard.auto_fix import ensure_limit, add_default_time_filter
@@ -810,33 +810,45 @@ def _has_data_entities_in_question(question: str) -> bool:
 
 def rag_search(question: str, k: int = 4) -> List[dict]:
     """
-    Search for relevant documents using RAG
+    Search for relevant documents using RAG with deduplication by source
     
     Args:
         question: User's question
         k: Number of results to return
         
     Returns:
-        List of relevant document chunks
+        List of relevant document chunks (deduplicated by source, keeping highest score)
     """
     try:
         vector = embed_query(question)
         
+        # Lấy dư để còn dedupe (lấy k * 5 hoặc tối thiểu 20)
         hits = qdrant_client.search(
             collection_name="knowledge_base",
             query_vector=vector,
-            limit=k
+            limit=max(k * 5, 20)
         )
         
-        return [
-            {
+        # Dedupe theo source, giữ hit có score cao nhất cho mỗi source
+        best_by_source = {}
+        for hit in hits:
+            source = (hit.payload or {}).get("source", "unknown")
+            
+            item = {
                 "doc_id": hit.id,
-                "score": hit.score,
-                "text": hit.payload.get("text", "")[:500],
-                "source": hit.payload.get("source", "unknown"),
+                "score": float(hit.score or 0),
+                "text": ((hit.payload or {}).get("text", "") or "")[:500],
+                "source": source,
             }
-            for hit in hits
-        ]
+            
+            # Giữ chunk có score cao nhất cho mỗi source
+            if source not in best_by_source or item["score"] > best_by_source[source]["score"]:
+                best_by_source[source] = item
+        
+        # Sắp xếp theo score giảm dần và lấy k đầu tiên
+        unique = sorted(best_by_source.values(), key=lambda x: x["score"], reverse=True)
+        return unique[:k]
+        
     except Exception as e:
         print(f"⚠️  RAG search error: {e}")
         return []
@@ -1218,7 +1230,8 @@ def ask(request: AskRequest, http_request: Request = None):
             else:
                 print(f"✅ Generated answer from RAG + LLM ({len(answer)} chars)")
             
-            # Build citations for display
+            # Build citations for display (dedupe để chắc chắn 100%)
+            citations_unique = dedupe_citations(citations, max_items=4) if citations else []
             citations_display = [
                 {
                     "doc_id": cite.get("doc_id", ""),
@@ -1226,8 +1239,8 @@ def ask(request: AskRequest, http_request: Request = None):
                     "text": cite.get("text", "")[:200],
                     "source": cite.get("source", "unknown"),
                 }
-                for cite in citations
-            ] if citations else None
+                for cite in citations_unique
+            ] if citations_unique else None
             
             log_conversation(session_id, "assistant", answer)
             

@@ -365,7 +365,14 @@ if st.session_state.last_sql or st.session_state.last_preview or st.session_stat
     
     with col3:
         if st.session_state.last_citations:
-            st.metric("📚 Tài liệu tham khảo", len(st.session_state.last_citations))
+            # Đếm unique sources, không đếm chunks
+            cits = st.session_state.last_citations or []
+            seen = set()
+            for c in cits:
+                src = (c.get("source") or "unknown").strip()
+                seen.add(src)
+            unique_count = len(seen)
+            st.metric("📚 Tài liệu tham khảo", unique_count)
     
     # SQL Query
     if st.session_state.last_sql:
@@ -417,10 +424,20 @@ if st.session_state.last_sql or st.session_state.last_preview or st.session_stat
                 if st.button("📈 Show Statistics"):
                     st.write(df.describe())
     
-    # Citations
+    # Citations - dedupe trước khi render
     if st.session_state.last_citations:
+        cits = st.session_state.last_citations or []
+        seen = set()
+        cits_unique = []
+        for c in cits:
+            src = (c.get("source") or "unknown").strip()
+            if src in seen:
+                continue
+            seen.add(src)
+            cits_unique.append(c)
+        
         with st.expander("📚 Tài liệu tham khảo", expanded=False):
-            for i, citation in enumerate(st.session_state.last_citations, 1):
+            for i, citation in enumerate(cits_unique, 1):
                 st.markdown(f"""
                 **{i}. {citation.get('source', 'Unknown')}**  
                 Độ liên quan: `{citation.get('score', 0):.2f}`
