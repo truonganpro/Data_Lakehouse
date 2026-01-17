@@ -92,6 +92,13 @@ brazilian-ecommerce/*.csv
 # Backup files
 *.bkp
 
+# Docker image exports (too large for git)
+*.tar
+*.tar.gz
+spark-*.tar
+spark-*.tar.gz
+docker_images_export/
+
 # Specific project files
 tmp/
 temp/

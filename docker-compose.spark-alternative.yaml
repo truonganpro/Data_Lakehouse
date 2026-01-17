@@ -1,0 +1,37 @@
+# Docker Compose Override cho Spark Alternative Image
+# Sử dụng khi bitnami/spark:3.3.2 không available
+# Chạy: docker compose -f docker-compose.yaml -f docker-compose.spark-alternative.yaml up -d
+
+version: '3.8'
+
+services:
+  spark-master:
+    build:
+      context: ./docker_image/spark
+      dockerfile: Dockerfile.alternative
+    image: spark-custom:3.3.2
+    volumes:
+      # Update path cho Apache Spark (không phải bitnami)
+      - ./docker_image/spark/conf/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf
+      - ./docker_image/spark/conf/log4j.properties:/opt/spark/conf/log4j.properties
+      - ./docker_image/spark/conf/hive-site.xml:/opt/spark/conf/hive-site.xml
+    environment:
+      - SPARK_MODE=master
+      # Apache Spark sử dụng path khác
+      - SPARK_CLASSPATH=/opt/jars/*:/opt/spark/jars/*
+      - SPARK_JARS_DIR=/opt/jars
+
+  spark-worker-1:
+    build:
+      context: ./docker_image/spark
+      dockerfile: Dockerfile.alternative
+    image: spark-custom:3.3.2
+    volumes:
+      - ./docker_image/spark/conf/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf
+      - ./docker_image/spark/conf/log4j.properties:/opt/spark/conf/log4j.properties
+      - ./docker_image/spark/conf/hive-site.xml:/opt/spark/conf/hive-site.xml
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://spark-master:7077
+      - SPARK_CLASSPATH=/opt/jars/*:/opt/spark/jars/*
+      - SPARK_JARS_DIR=/opt/jars
