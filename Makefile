@@ -91,11 +91,8 @@ create_bucket:
 
 .PHONY: forecast-init
 forecast-init:
-	@echo "🔧 Initializing MLflow database..."
-	@bash scripts/init_mlflow.sh
-	@echo ""
-	@echo "🔧 Creating forecast_monitoring table..."
-	@bash scripts/init_forecast_monitoring.sh
+	@echo "🔧 Initializing forecasting system..."
+	@bash scripts/init_forecast.sh
 
 .PHONY: forecast-features
 forecast-features:

@@ -11,9 +11,7 @@ except ImportError:
 from .assets import bronze, silver, gold, platinum
 from .assets import maintenance
 from .job import reload_data, full_pipeline_job
-from .job import maintenance_job
 from .schedule import reload_data_schedule
-from .schedule import maintenance_schedule
 from .resources.minio_io_manager import MinioIOManager
 from .resources.mysql_io_manager import MysqlIOManager
 from .resources.spark_io_manager import SparkIOManager
@@ -70,24 +68,7 @@ maintenance_assets = load_assets_from_modules([maintenance])
 # Collect jobs and schedules
 all_jobs = [reload_data, full_pipeline_job]
 
-# Add maintenance jobs
-try:
-    from .job.maintenance_job import (
-        compact_recent_partitions_job,
-        compact_platinum_job,
-        vacuum_job,
-        monitor_job,
-        all_maintenance_job
-    )
-    all_jobs.extend([
-        compact_recent_partitions_job,
-        compact_platinum_job,
-        vacuum_job,
-        monitor_job,
-        all_maintenance_job
-    ])
-except ImportError:
-    pass
+# Maintenance jobs removed - using optimize_lakehouse_job instead
 
 # Add optimize job
 try:
@@ -98,22 +79,7 @@ except ImportError:
 
 all_schedules = [reload_data_schedule]
 
-# Add maintenance schedules
-try:
-    from .schedule.maintenance_schedule import (
-        daily_compaction_gold_schedule,
-        daily_compaction_platinum_schedule,
-        weekly_vacuum_schedule,
-        daily_small_files_monitor_schedule
-    )
-    all_schedules.extend([
-        daily_compaction_gold_schedule,
-        daily_compaction_platinum_schedule,
-        weekly_vacuum_schedule,
-        daily_small_files_monitor_schedule
-    ])
-except ImportError:
-    pass
+# Maintenance schedules removed - using daily_optimize_lakehouse_schedule instead
 
 # Add optimize schedule
 try:

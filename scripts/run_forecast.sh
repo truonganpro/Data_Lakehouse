@@ -35,40 +35,7 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "🔧 STEP 2/6: Initialize MLflow & monitoring table..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-# Init MLflow
-echo "📊 Creating MLflow database..."
-docker exec de_mysql mysql -uroot -padmin123 << MYSQL_SQL
-CREATE DATABASE IF NOT EXISTS mlflowdb CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER IF NOT EXISTS 'mlflow'@'%' IDENTIFIED BY 'mlflow';
-GRANT ALL PRIVILEGES ON mlflowdb.* TO 'mlflow'@'%';
-FLUSH PRIVILEGES;
-SELECT 'MLflow database created' AS status;
-MYSQL_SQL
-
-# Init monitoring table
-echo "📈 Creating forecast_monitoring table..."
-docker exec spark-master spark-sql << SPARK_SQL
-CREATE TABLE IF NOT EXISTS lakehouse.platinum.forecast_monitoring (
-  date DATE,
-  product_id VARCHAR(100),
-  region_id VARCHAR(10),
-  horizon INT,
-  y_actual DOUBLE,
-  yhat DOUBLE,
-  yhat_lo DOUBLE,
-  yhat_hi DOUBLE,
-  abs_error DOUBLE,
-  pct_error DOUBLE,
-  smape DOUBLE,
-  model_name VARCHAR(50),
-  run_id VARCHAR(100)
-)
-USING delta
-PARTITIONED BY (date)
-LOCATION 's3a://lakehouse/platinum/forecast_monitoring';
-SPARK_SQL
-
-echo "✅ MLflow & monitoring table initialized"
+bash scripts/init_forecast.sh
 echo ""
 
 # ===================================================================
